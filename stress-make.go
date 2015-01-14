@@ -544,7 +544,11 @@ func main() {
 
 	// Report some Makefile statistics.
 	stats.Finalize()
+	T_1 := stats.GetSequentialTime()
+	T_inf := stats.GetParallelTime()
 	log.Printf("INFO: Total commands launched = %d", stats.GetTotalProcesses())
 	log.Printf("INFO: Maximum concurrency observed = %d", stats.GetMaxConcurrency())
-	log.Printf("INFO: Sequential time = %v", stats.GetSeqentialTime())
+	log.Printf("INFO: Time on a single CPU core (T_1) = %v", T_1)
+	log.Printf("INFO: Time on infinite CPU cores (T_inf) = %v", T_inf)
+	log.Printf("INFO: Maximum possible speedup (T_1/T_inf) = %f", float64(T_1)/float64(T_inf))
 }

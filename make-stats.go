@@ -15,6 +15,7 @@ type Statistics struct {
 	pidToTime  map[pid_t]time.Duration // Wall-clock time a process consumed
 	children   map[pid_t][]pid_t       // Association of a parent with all of its children
 	seqTime    time.Duration           // Total time if the Makefile ran sequentially
+	parTime    time.Duration           // Total time if the Makefile ran on an infinite number of processors
 	lock       sync.Mutex              // Protect the entire structure
 }
 
@@ -62,12 +63,20 @@ func (st *Statistics) GetTotalProcesses() int64 {
 	return st.totalProcs
 }
 
-// GetSeqentialTime returns the time the Makefile would have run if run
-// sequentially (and without stress-make oberhead).
-func (st *Statistics) GetSeqentialTime() time.Duration {
+// GetSequentialTime returns the time the Makefile would have run if run
+// sequentially (and without stress-make overhead).
+func (st *Statistics) GetSequentialTime() time.Duration {
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	return st.seqTime
+}
+
+// GetParallelTime returns the time the Makefile would have run if run
+// on an infinite number of processors.
+func (st *Statistics) GetParallelTime() time.Duration {
+	st.lock.Lock()
+	defer st.lock.Unlock()
+	return st.parTime
 }
 
 // Finalize prepares a Statistics for output.  It should be called before any
@@ -94,10 +103,30 @@ func (st *Statistics) Finalize() {
 		st.pidToTime[pid] = parentTime
 	}
 	incltoExcl(0)
-	delete(st.pidToTime, 0)
+	st.pidToTime[0] = 0
 
-	// Add up all times to produce a total sequential time.
+	// Add up all exclusive times to produce a total sequential time.
 	for _, dur := range st.pidToTime {
 		st.seqTime += dur
 	}
+
+	// Compute the critical-path time as the longest-time path from the
+	// root of the tree (PID 0) to any leaf.
+	var findCritPath func(pid_t, time.Duration)
+	findCritPath = func(pid pid_t, timeExclPid time.Duration) {
+		timeInclPid := timeExclPid + st.pidToTime[pid]
+		kidPids, ok := st.children[pid]
+		if !ok {
+			// PID is a leaf.  See if we broke the time record.
+			if timeInclPid > st.parTime {
+				st.parTime = timeInclPid
+			}
+			return
+		}
+		for _, kPid := range kidPids {
+			// Recursively follow each subpath.
+			findCritPath(kPid, timeInclPid)
+		}
+	}
+	findCritPath(0, 0)
 }
