@@ -41,6 +41,13 @@ var maxLiveChildren int64 = 1
 // currently executing.  The initial GNU Make process counts as 1.
 var currentLiveChildren int64 = 1
 
+// maxConcurrencyObserved keeps track of the maximum concurrency the Makefile
+// can take advantage of.
+var maxConcurrencyObserved int64 = 0
+
+// totalEnqueued keeps track of the total number of children enqueued.
+var totalEnqueued int64 = 0
+
 // ChildCmd extends *exec.Cmd with a fake PID to return to GNU Make.
 type ChildCmd struct {
 	*exec.Cmd
@@ -158,6 +165,16 @@ func UpdateState() {
 				pidPendingCommands[mkPid] = pidMap
 			}
 			pidMap[fPid] = *&empty{}
+
+			// For reporting purposes, keep track of the maximium
+			// number of pending + running commands that existed at
+			// any one time and of the total number of commands
+			// enqueued.
+			nConc := int64(len(allPendingCommands)) + atomic.LoadInt64(&currentLiveChildren) - 1 // -1 because of GNU Make itself
+			if nConc > maxConcurrencyObserved {
+				maxConcurrencyObserved = nConc
+			}
+			totalEnqueued++
 
 			// Return the fake PID.
 			qReq.RespChan <- fPid
@@ -496,4 +513,8 @@ func main() {
 
 	// Run our customized GNU Make as a child process.
 	spawnMake(sockName, os.Args[1:])
+
+	// Report some Makefile statistics.
+	log.Printf("INFO: Total commands launched = %d", totalEnqueued)
+	log.Printf("INFO: Maximum concurrency observed = %d", maxConcurrencyObserved)
 }
