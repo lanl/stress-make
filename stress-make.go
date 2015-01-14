@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
@@ -12,6 +13,7 @@ import (
 	"os/signal"
 	"path"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -469,10 +471,36 @@ func spawnMake(sockName string, argList []string) {
 	}
 }
 
+// ParseCommandLine parses the command line.
+func parseCommandLine() {
+	// Assign program variables based on command-line options.
+	flag.Int64Var(&maxLiveChildren, "max-live", 1, "Maximum number of processes allowed to run at once")
+	qOrder := flag.String("order", "fifo", "Order in which to run processes (\"fifo\", \"lifo\", or \"random\")")
+	flag.Parse()
+
+	// Abort if we were given a bad option.
+	if maxLiveChildren < 1 {
+		log.Fatal("At least one process must be allowed to run")
+	}
+	switch strings.ToLower(*qOrder) {
+	case "fifo":
+		deqOrder = FIFOOrder
+	case "lifo":
+		deqOrder = LIFOOrder
+	case "random":
+		deqOrder = RandomOrder
+	default:
+		log.Fatalf("Unrecognized execution order %q", qOrder)
+	}
+}
+
 func main() {
 	// Prepare the logger for issuing warnings and errors.
 	log.SetFlags(0)
 	log.SetPrefix(os.Args[0] + ": ")
+
+	// Parse the command line.
+	parseCommandLine()
 
 	// Seed a pseudorandom-number generator.
 	seed := int64(os.Getpid()) * int64(os.Getppid()) * int64(time.Now().UnixNano())
@@ -512,7 +540,7 @@ func main() {
 	go serverLoop(listener)
 
 	// Run our customized GNU Make as a child process.
-	spawnMake(sockName, os.Args[1:])
+	spawnMake(sockName, flag.Args())
 
 	// Report some Makefile statistics.
 	log.Printf("INFO: Total commands launched = %d", totalEnqueued)
