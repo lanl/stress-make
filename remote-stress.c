@@ -86,8 +86,6 @@ request_response (const char *request)
   struct sockaddr_un addr;  /* Address on which the stress-test server is listening */
   static char response[MAX_RESPONSE_LEN + 1];   /* Response from the server */
 
-  fprintf(stderr, ">>> REQUEST: %s <<<\n", request);  // Temporary
-
   /* Create a local socket. */
   local_socket = socket(PF_LOCAL, SOCK_STREAM, 0);
   if (local_socket == -1)
@@ -113,7 +111,6 @@ request_response (const char *request)
 
   /* Return the message. */
   (void) close(local_socket);
-  fprintf(stderr, ">>> RESPONSE: %s <<<\n", response);  // Temporary
   return response;
 
 failure:

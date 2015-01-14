@@ -204,9 +204,18 @@ func UpdateState() {
 			// Ensure we have a command to run.
 			nPending := len(allPendingCommands)
 			if nPending == 0 {
-				// Something is seriously wrong.  Make thought
-				// it had pending commands, but it didn't.
-				qReq.RespChan <- 0
+				if atomic.LoadInt64(&currentLiveChildren) == 0 {
+					// Something is seriously wrong.  Make
+					// thought it had pending commands, but
+					// it didn't.
+					qReq.RespChan <- 0
+				} else {
+					// We have nothing new to run so the
+					// caller just needs to wait for the
+					// currently running commands to
+					// finish.
+					qReq.RespChan <- 1
+				}
 				close(qReq.RespChan)
 				continue
 			}
@@ -318,7 +327,7 @@ func awaitCommand(query *RemoteQuery, conn *net.UnixConn) {
 	if <-qRespChan == 0 {
 		// Something went wrong -- probably that there are no new
 		// commands to run.  Notify the caller.
-		fmt.Fprint(conn, "-1 -1 -1 -1")
+		fmt.Fprint(conn, "-1 0 0 0")
 		return
 	}
 
@@ -331,6 +340,7 @@ func awaitCommand(query *RemoteQuery, conn *net.UnixConn) {
 	} else {
 		select {
 		case cmd = <-completedCommands[mkPid]:
+		default:
 		}
 	}
 	if cmd.FakePid != 0 {
@@ -357,7 +367,7 @@ func awaitCommand(query *RemoteQuery, conn *net.UnixConn) {
 	}
 
 	// No command finished.  Tell the caller to be patient.
-	fmt.Fprint(conn, "0 -1 -1 -1")
+	fmt.Fprint(conn, "0 0 0 0")
 }
 
 // killProcess sends a kill signal to a pending or running process.
