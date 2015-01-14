@@ -38,8 +38,8 @@ var deqOrder DequeueOrder = LIFOOrder
 var maxLiveChildren int64 = 1
 
 // currentLiveChildren specifies the number of children that are
-// currently executing.
-var currentLiveChildren int64 = 0
+// currently executing.  The initial GNU Make process counts as 1.
+var currentLiveChildren int64 = 1
 
 // ChildCmd extends *exec.Cmd with a fake PID to return to GNU Make.
 type ChildCmd struct {
@@ -320,6 +320,12 @@ func awaitCommand(query *RemoteQuery, conn *net.UnixConn) {
 		log.Fatal("Received a status request with an unspecified PID")
 	}
 	mkPid := query.Pid
+
+	// If GNU Make blocks, it no longer counts as live.
+	if query.Block {
+		atomic.AddInt64(&currentLiveChildren, -1)
+		defer atomic.AddInt64(&currentLiveChildren, 1)
+	}
 
 	// Launch as many new commands as possible,
 	qRespChan := make(chan uint64)
