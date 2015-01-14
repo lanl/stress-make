@@ -43,32 +43,31 @@ var maxLiveChildren int64 = 1
 // currently executing.  The initial GNU Make process counts as 1.
 var currentLiveChildren int64 = 1
 
-// maxConcurrencyObserved keeps track of the maximum concurrency the Makefile
-// can take advantage of.
-var maxConcurrencyObserved int64 = 0
+// stats keeps track of various interesting statistics regarding the build.
+var stats *Statistics = NewStatistics()
 
-// totalEnqueued keeps track of the total number of children enqueued.
-var totalEnqueued int64 = 0
+// As in C, a pid_t represents a process ID (real or fake).
+type pid_t int
 
 // ChildCmd extends *exec.Cmd with a fake PID to return to GNU Make.
 type ChildCmd struct {
 	*exec.Cmd
-	FakePid uint64
+	FakePid pid_t
 }
 
 // completedCommands reports children that have completed on a per-PID
 // basis (i.e., PID of the GNU Make process requesting the child).
-var completedCommands map[uint64]chan ChildCmd
+var completedCommands map[pid_t]chan ChildCmd
 
 // fakePidToCmd maps a fabricated process ID to the associated command
 // structure.
-var fakePidToCmd map[uint64]*exec.Cmd
+var fakePidToCmd map[pid_t]*exec.Cmd
 
 // maxPid is the maximum process ID allowed by the OS.
-var maxPid uint64 = 32768
+var maxPid pid_t = 32768
 
 // nextPid is the next available (fake) process ID we should return.
-var nextFakePid uint64 = 2
+var nextFakePid pid_t = 2
 
 // prng is a pseudorandom-number generator.
 var prng *rand.Rand
@@ -127,10 +126,10 @@ func readProcUint64(procFile string) (value uint64, err error) {
 // Command nor Killpid are specified, this requests that a pending shell
 // command be run.
 type queueRequest struct {
-	MakePid  uint64      // Process ID (from a GNU Make process) that initiated the request
-	Command  *exec.Cmd   // Command to enqueue on the pending queue
-	KillPid  uint64      // (Fake) process ID to kill
-	RespChan chan uint64 // Response (success code or PID)
+	MakePid  pid_t      // Process ID (from a GNU Make process) that initiated the request
+	Command  *exec.Cmd  // Command to enqueue on the pending queue
+	KillPid  pid_t      // (Fake) process ID to kill
+	RespChan chan pid_t // Response (success code or PID)
 }
 
 // qReqChan is the channel used to talk to the single instance of UpdateState.
@@ -139,8 +138,8 @@ var qReqChan chan queueRequest
 // UpdateState safely updates global state in a concurrent context.  Much of
 // what the program actually does is encapsulated in the UpdateState routine.
 func UpdateState() {
-	allPendingCommands := make([]uint64, 0, maxLiveChildren) // All pending commands (by fake PID) across all Make processes
-	pidPendingCommands := make(map[uint64]map[uint64]empty)  // Subset of allPendingCommands local to a Make PID
+	allPendingCommands := make([]pid_t, 0, maxLiveChildren) // All pending commands (by fake PID) across all Make processes
+	pidPendingCommands := make(map[pid_t]map[pid_t]empty)   // Subset of allPendingCommands local to a Make PID
 	for qReq := range qReqChan {
 		if qReq.RespChan == nil {
 			log.Fatal("Internal error processing a queue request")
@@ -163,7 +162,7 @@ func UpdateState() {
 			pidMap, ok := pidPendingCommands[mkPid]
 			if !ok {
 				// This is the first request from PID MakePid.
-				pidMap = make(map[uint64]empty, maxLiveChildren)
+				pidMap = make(map[pid_t]empty, maxLiveChildren)
 				pidPendingCommands[mkPid] = pidMap
 			}
 			pidMap[fPid] = *&empty{}
@@ -173,10 +172,7 @@ func UpdateState() {
 			// any one time and of the total number of commands
 			// enqueued.
 			nConc := int64(len(allPendingCommands)) + atomic.LoadInt64(&currentLiveChildren) - 1 // -1 because of GNU Make itself
-			if nConc > maxConcurrencyObserved {
-				maxConcurrencyObserved = nConc
-			}
-			totalEnqueued++
+			stats.ObserveConcurrency(nConc)
 
 			// Return the fake PID.
 			qReq.RespChan <- fPid
@@ -272,12 +268,15 @@ func UpdateState() {
 				go func() {
 					// Run the command then "kill" it to
 					// remove it from fakePidToCmd.
+					beginTime := time.Now()
 					err := cmd.Run()
 					if err != nil {
 						log.Fatal(err)
 					}
 					atomic.AddInt64(&currentLiveChildren, -1)
-					qRespChan := make(chan uint64)
+					stats.ObserveExecution(pid_t(cmd.Process.Pid), mkPid, time.Since(beginTime))
+
+					qRespChan := make(chan pid_t)
 					qReqChan <- queueRequest{MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}
 					_ = <-qRespChan
 					completedCommands[mkPid] <- ChildCmd{Cmd: cmd, FakePid: fPid}
@@ -295,8 +294,8 @@ type RemoteQuery struct {
 	Args    []string // spawn: Command to run plus all arguments
 	Environ []string // spawn: Environment to use (list of key=value pairs)
 	Block   bool     // status: true=wait; false=return immediately
-	Victim  uint64   // kill: Victim process ID (really a fake PID)
-	Pid     uint64   // all: GNU Make process ID
+	Victim  pid_t    // kill: Victim process ID (really a fake PID)
+	Pid     pid_t    // all: GNU Make process ID
 }
 
 // enqueueCommand prepares a user-specified command for execution and
@@ -325,7 +324,7 @@ func enqueueCommand(query *RemoteQuery, conn *net.UnixConn) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	qRespChan := make(chan uint64)
+	qRespChan := make(chan pid_t)
 	qReqChan <- queueRequest{MakePid: query.Pid, Command: cmd, RespChan: qRespChan}
 	fmt.Fprint(conn, <-qRespChan)
 }
@@ -347,7 +346,7 @@ func awaitCommand(query *RemoteQuery, conn *net.UnixConn) {
 	}
 
 	// Launch as many new commands as possible,
-	qRespChan := make(chan uint64)
+	qRespChan := make(chan pid_t)
 	qReqChan <- queueRequest{MakePid: mkPid, RespChan: qRespChan}
 	if <-qRespChan == 0 {
 		// Something went wrong -- probably that there are no new
@@ -408,7 +407,7 @@ func killProcess(query *RemoteQuery, conn *net.UnixConn) {
 	fPid := query.Victim
 
 	// Kill the process.
-	qRespChan := make(chan uint64)
+	qRespChan := make(chan pid_t)
 	qReqChan <- queueRequest{MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}
 	if <-qRespChan == 0 {
 		// Something went wrong -- probably that there the victim PID
@@ -466,9 +465,11 @@ func spawnMake(sockName string, argList []string) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	beginTime := time.Now()
 	if err := cmd.Run(); err != nil {
 		log.Fatal(err)
 	}
+	stats.ObserveExecution(pid_t(cmd.Process.Pid), 0, time.Since(beginTime))
 }
 
 // ParseCommandLine parses the command line.
@@ -507,16 +508,15 @@ func main() {
 	prng = rand.New(rand.NewSource(seed))
 
 	// Determine the maximum process ID we're allowed to use.
-	var err error
-	maxPid, err = readProcUint64("/proc/sys/kernel/pid_max")
-	if err != nil {
-		maxPid = 32768
+	maxPid64, err := readProcUint64("/proc/sys/kernel/pid_max")
+	if err == nil {
+		maxPid = pid_t(maxPid64)
 	}
-	fakePidToCmd = make(map[uint64]*exec.Cmd)
+	fakePidToCmd = make(map[pid_t]*exec.Cmd)
 
 	// Launch an internal server for serializing accesses to global data
 	// structures.
-	completedCommands = make(map[uint64]chan ChildCmd)
+	completedCommands = make(map[pid_t]chan ChildCmd)
 	qReqChan = make(chan queueRequest, maxLiveChildren)
 	go UpdateState()
 
@@ -543,6 +543,8 @@ func main() {
 	spawnMake(sockName, flag.Args())
 
 	// Report some Makefile statistics.
-	log.Printf("INFO: Total commands launched = %d", totalEnqueued)
-	log.Printf("INFO: Maximum concurrency observed = %d", maxConcurrencyObserved)
+	stats.Finalize()
+	log.Printf("INFO: Total commands launched = %d", stats.GetTotalProcesses())
+	log.Printf("INFO: Maximum concurrency observed = %d", stats.GetMaxConcurrency())
+	log.Printf("INFO: Sequential time = %v", stats.GetSeqentialTime())
 }
