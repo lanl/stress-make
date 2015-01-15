@@ -11,7 +11,7 @@ import (
 type Statistics struct {
 	maxConc int64 // Maximum concurrency the Makefile can exploit
 
-	totalProcs int64                   // Total number of processes run
+	totalProcs int64                   // Total number of processes spawned by GNU Make
 	pidToTime  map[pid_t]time.Duration // Wall-clock time a process consumed
 	children   map[pid_t][]pid_t       // Association of a parent with all of its children
 	seqTime    time.Duration           // Total time if the Makefile ran sequentially
@@ -92,7 +92,27 @@ func (st *Statistics) Finalize() {
 	st.lock.Lock()
 	defer st.lock.Unlock()
 
-	// pidToTime represents inclusive time (PID + children).  Make it
+	// GNU Make processes have no time recorded.  Propagate up
+	// their children's time.
+	var propagateTimeUp func(pid_t) time.Duration
+	propagateTimeUp = func(pid pid_t) time.Duration {
+		pidTime := st.pidToTime[pid]
+		kidPids, ok := st.children[pid]
+		if !ok {
+			// Leaf (no children)
+			return pidTime
+		}
+		for _, kPid := range kidPids {
+			pidTime += propagateTimeUp(kPid)
+		}
+		if st.pidToTime[pid] == 0 {
+			st.pidToTime[pid] = pidTime
+		}
+		return st.pidToTime[pid]
+	}
+	propagateTimeUp(0)
+
+	// pidToTime now represents inclusive time (PID + children).  Make it
 	// represent exclusive time (PID by itself).
 	var incltoExcl func(pid_t)
 	incltoExcl = func(pid pid_t) {
@@ -100,6 +120,7 @@ func (st *Statistics) Finalize() {
 		// perform the same operation recursively on the child.
 		kidPids, ok := st.children[pid]
 		if !ok {
+			// Leaf (no children)
 			return
 		}
 		parentTime := st.pidToTime[pid]

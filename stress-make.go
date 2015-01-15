@@ -501,11 +501,9 @@ func spawnMake(sockName string, argList []string) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	beginTime := time.Now()
 	if err := cmd.Run(); err != nil {
 		log.Fatal(err)
 	}
-	stats.ObserveExecution(1, 0, time.Since(beginTime))
 }
 
 // ParseCommandLine parses the command line.
@@ -543,7 +541,8 @@ func main() {
 	seed := int64(os.Getpid()) * int64(os.Getppid()) * int64(time.Now().UnixNano())
 	prng = rand.New(rand.NewSource(seed))
 
-	// Allocate a mapping from fake PIDs to commands.
+	// Allocate a mapping from fake PIDs to commands and from GNU
+	// Make fake PIDs to begin times.
 	fakePidToCmd = make(map[pid_t]*exec.Cmd)
 
 	// Launch an internal server for serializing accesses to global data
