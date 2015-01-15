@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -63,8 +62,8 @@ var completedCommands map[pid_t]chan ChildCmd
 // structure.
 var fakePidToCmd map[pid_t]*exec.Cmd
 
-// maxPid is the maximum process ID allowed by the OS.
-var maxPid pid_t = 32768
+// maxFakePid is the maximum value allowed for a fake PID.
+var maxFakePid pid_t = 2147483647
 
 // nextPid is the next available (fake) process ID we should return.
 var nextFakePid pid_t = 2
@@ -104,23 +103,6 @@ func createSocket() (string, *net.UnixListener) {
 	}
 }
 
-// readProcUint64 reads a uint64 from Linux's proc filesystem.
-func readProcUint64(procFile string) (value uint64, err error) {
-	var fd *os.File
-	fd, err = os.Open(procFile)
-	if err != nil {
-		return
-	}
-	defer fd.Close()
-	sizeStr := make([]byte, 25)
-	nRead, err := fd.Read(sizeStr)
-	if err != nil {
-		return
-	}
-	value, err = strconv.ParseUint(string(sizeStr[:nRead]), 10, 64)
-	return
-}
-
 // A queueRequest is used internally to request updates to global data
 // structures.  MakePid and RespChan must always be specified.  If neither
 // Command nor Killpid are specified, this requests that a pending shell
@@ -150,11 +132,10 @@ func UpdateState() {
 			// Allocate a new fake PID.
 			fPid := nextFakePid
 			fakePidToCmd[fPid] = qReq.Command
-			if nextFakePid == maxPid {
-				nextFakePid = 2
-			} else {
-				nextFakePid++
+			if nextFakePid == maxFakePid {
+				log.Fatalf("Too many processes (> %d)", maxFakePid)
 			}
+			nextFakePid++
 
 			// Enqueue a new pending command on both the global
 			// list and the per-PID set.
@@ -507,11 +488,7 @@ func main() {
 	seed := int64(os.Getpid()) * int64(os.Getppid()) * int64(time.Now().UnixNano())
 	prng = rand.New(rand.NewSource(seed))
 
-	// Determine the maximum process ID we're allowed to use.
-	maxPid64, err := readProcUint64("/proc/sys/kernel/pid_max")
-	if err == nil {
-		maxPid = pid_t(maxPid64)
-	}
+	// Allocate a mapping from fake PIDs to commands.
 	fakePidToCmd = make(map[pid_t]*exec.Cmd)
 
 	// Launch an internal server for serializing accesses to global data
