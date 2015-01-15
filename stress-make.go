@@ -520,12 +520,39 @@ func spawnMake(sockName string, argList []string) {
 	}
 }
 
-// ParseCommandLine parses the command line.
-func parseCommandLine() {
-	// Assign program variables based on command-line options.
-	flag.Int64Var(&maxLiveChildren, "max-live", 1, "Maximum number of processes allowed to run at once")
-	qOrder := flag.String("order", "fifo", "Order in which to run processes (\"fifo\", \"lifo\", or \"random\")")
-	flag.Parse()
+// ParseCommandLine parses the command line and returns a list of command-line
+// options for GNU Make to parse.
+func parseCommandLine() []string {
+	// Define our command-line flags.
+	fset := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	fset.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [<stress-make options>] [<make options>] [<targets>]\n", os.Args[0])
+		fset.PrintDefaults()
+	}
+	fset.Int64Var(&maxLiveChildren, "max-live", 1, "Maximum number of processes allowed to run at once")
+	qOrder := fset.String("order", "fifo", "Order in which to run processes (\"fifo\", \"lifo\", or \"random\")")
+	argNames := []string{"help", "h"}
+	fset.VisitAll(func(f *flag.Flag) {
+		argNames = append(argNames, f.Name)
+	})
+
+	// Split the command line into arguments of interest to stress-make and
+	// those of interest to GNU Make.
+	ourArgs := make([]string, 0, len(os.Args))
+	theirArgs := make([]string, 0, len(os.Args))
+argLoop:
+	for _, arg := range os.Args[1:] {
+		for _, name := range argNames {
+			if strings.HasPrefix(arg, "-"+name) || strings.HasPrefix(arg, "--"+name) {
+				ourArgs = append(ourArgs, arg)
+				continue argLoop
+			}
+		}
+		theirArgs = append(theirArgs, arg)
+	}
+
+	// Parse the command line.
+	fset.Parse(ourArgs)
 
 	// Abort if we were given a bad option.
 	if maxLiveChildren < 1 {
@@ -539,8 +566,9 @@ func parseCommandLine() {
 	case "random":
 		deqOrder = RandomOrder
 	default:
-		log.Fatalf("Unrecognized execution order %q", qOrder)
+		log.Fatalf("Unrecognized execution order %q", *qOrder)
 	}
+	return theirArgs
 }
 
 func main() {
@@ -549,7 +577,7 @@ func main() {
 	log.SetPrefix(os.Args[0] + ": ")
 
 	// Parse the command line.
-	parseCommandLine()
+	makeArgs := parseCommandLine()
 
 	// Seed a pseudorandom-number generator.
 	seed := int64(os.Getpid()) * int64(os.Getppid()) * int64(time.Now().UnixNano())
@@ -585,7 +613,7 @@ func main() {
 	go serverLoop(listener)
 
 	// Run our customized GNU Make as a child process.
-	spawnMake(sockName, flag.Args())
+	spawnMake(sockName, makeArgs)
 
 	// Report some Makefile statistics.
 	stats.Finalize()
