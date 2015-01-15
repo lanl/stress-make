@@ -40,7 +40,7 @@ var maxLiveChildren int64 = 1
 
 // currentLiveChildren specifies the number of children that are
 // currently executing.  The initial GNU Make process counts as 1.
-var currentLiveChildren int64 = 0
+var currentLiveChildren int64 = 1
 
 // stats keeps track of various interesting statistics regarding the build.
 var stats *Statistics = NewStatistics()
@@ -186,7 +186,7 @@ func updateStateEnqueue(qReq *queueRequest, allPendingCommands *[]pid_t, pidPend
 	// For reporting purposes, keep track of the maximium number of pending
 	// + running commands that existed at any one time and of the total
 	// number of commands enqueued.
-	nConc := int64(len(*allPendingCommands)) + atomic.LoadInt64(&currentLiveChildren)
+	nConc := int64(len(*allPendingCommands)) + atomic.LoadInt64(&currentLiveChildren) - 1 // -1 because of GNU Make itself
 	stats.ObserveConcurrency(nConc)
 
 	// Return the fake PID.
@@ -236,7 +236,7 @@ func updateStateWait(qReq *queueRequest, allPendingCommands *[]pid_t, pidPending
 	// Ensure we have a command to run.
 	nPending := len(*allPendingCommands)
 	if nPending == 0 {
-		if atomic.LoadInt64(&currentLiveChildren) < 0 {
+		if atomic.LoadInt64(&currentLiveChildren) == 0 {
 			// Something is seriously wrong.  Make thought it had
 			// pending commands, but it didn't.
 			qReq.RespChan <- 0
