@@ -129,7 +129,180 @@ type queueRequest struct {
 // qReqChan is the channel used to talk to the single instance of UpdateState.
 var qReqChan chan queueRequest
 
-// UpdateState safely updates global state in a concurrent context.  Much of
+// updateStateHello is called by UpdateState upon receiving a Hello request.
+func updateStateHello(qReq *queueRequest) {
+	// Allocate a fake PID for a new GNU Make process.
+	mkPid := qReq.MakePid
+	fPid := nextFakePid
+	if nextFakePid == maxFakePid {
+		log.Fatalf("Too many processes (> %d)", maxFakePid)
+	}
+	nextFakePid++
+	stats.ObserveSpawn(mkPid, fPid)
+	qReq.RespChan <- fPid
+	close(qReq.RespChan)
+}
+
+// updateStateEnqueue is called by UpdateState upon receiving an Enqueue
+// request.
+func updateStateEnqueue(qReq *queueRequest, allPendingCommands *[]pid_t, pidPendingCommands map[pid_t]map[pid_t]empty) {
+	// Allocate a new fake PID.
+	fPid := nextFakePid
+	fakePidToCmd[fPid] = qReq.Command
+	if nextFakePid == maxFakePid {
+		log.Fatalf("Too many processes (> %d)", maxFakePid)
+	}
+	nextFakePid++
+
+	// Set the fake PID in the command's environment.
+	elide := -1
+	newEnv := qReq.Command.Env
+	for i, eVar := range newEnv {
+		if strings.HasPrefix(eVar, "STRESSMAKE_FAKE_PID=") {
+			elide = i
+			break
+		}
+	}
+	if elide == -1 {
+		log.Fatal("Internal error: fake PID not set")
+	}
+	oldLen := len(newEnv)
+	newEnv[elide] = newEnv[oldLen-1]
+	newEnv = newEnv[:oldLen-1]
+	qReq.Command.Env = append(newEnv, fmt.Sprintf("STRESSMAKE_FAKE_PID=%d", fPid))
+
+	// Enqueue a new pending command on both the global list and the
+	// per-PID set.
+	*allPendingCommands = append(*allPendingCommands, fPid)
+	mkPid := qReq.MakePid
+	pidMap, ok := pidPendingCommands[mkPid]
+	if !ok {
+		// This is the first request from PID MakePid.
+		pidMap = make(map[pid_t]empty, maxLiveChildren)
+		pidPendingCommands[mkPid] = pidMap
+	}
+	pidMap[fPid] = *&empty{}
+
+	// For reporting purposes, keep track of the maximium number of pending
+	// + running commands that existed at any one time and of the total
+	// number of commands enqueued.
+	nConc := int64(len(*allPendingCommands)) + atomic.LoadInt64(&currentLiveChildren) - 1 // -1 because of GNU Make itself
+	stats.ObserveConcurrency(nConc)
+
+	// Return the fake PID.
+	qReq.RespChan <- fPid
+	close(qReq.RespChan)
+}
+
+// updateStateKill is called by UpdateState upon receiving a Kill request.
+func updateStateKill(qReq *queueRequest, allPendingCommands *[]pid_t, pidPendingCommands map[pid_t]map[pid_t]empty) {
+	// Kill the job if it's running.
+	fPid := qReq.KillPid
+	cmd, ok := fakePidToCmd[fPid]
+	if !ok {
+		// Error case (invalid fake PID)
+		qReq.RespChan <- 0
+		close(qReq.RespChan)
+		return
+	}
+	if cmd.Process != nil {
+		// Job has launched.  Kill it.
+		if cmd.Process.Signal(os.Kill) != nil {
+			ok = false
+		}
+	}
+
+	// Whether or not the job has launched, elide the command from
+	// allPendingCommands, and delete it from pidPendingCommands.  Also
+	// delete the association between the fake PID and the command.
+	delete(fakePidToCmd, fPid)
+	for i, pendingPid := range *allPendingCommands {
+		if pendingPid == fPid {
+			*allPendingCommands = append((*allPendingCommands)[:i], (*allPendingCommands)[i+1:]...)
+			delete(pidPendingCommands[qReq.MakePid], fPid)
+			break
+		}
+	}
+	if ok {
+		qReq.RespChan <- 1
+	} else {
+		qReq.RespChan <- 0
+	}
+	close(qReq.RespChan)
+}
+
+// updateStateWait is called by UpdateState upon receiving a Wait request.
+func updateStateWait(qReq *queueRequest, allPendingCommands *[]pid_t, pidPendingCommands map[pid_t]map[pid_t]empty) {
+	// Ensure we have a command to run.
+	nPending := len(*allPendingCommands)
+	if nPending == 0 {
+		if atomic.LoadInt64(&currentLiveChildren) == 0 {
+			// Something is seriously wrong.  Make thought it had
+			// pending commands, but it didn't.
+			qReq.RespChan <- 0
+		} else {
+			// We have nothing new to run so the caller just needs
+			// to wait for the currently running commands to
+			// finish.
+			qReq.RespChan <- 1
+		}
+		close(qReq.RespChan)
+		return
+	}
+
+	// Run as many commands as we can.
+	for nPending > 0 && atomic.LoadInt64(&currentLiveChildren) < maxLiveChildren {
+		// Select a pending command to run.
+		var idx int
+		switch deqOrder {
+		case FIFOOrder:
+			idx = 0
+		case LIFOOrder:
+			idx = nPending - 1
+		case RandomOrder:
+			idx = prng.Intn(nPending)
+		default:
+			log.Fatal("Internal error processing the dequeue order")
+		}
+
+		// Elide the command from allPendingCommands, and delete it
+		// from pidPendingCommands.
+		mkPid := qReq.MakePid
+		fPid := (*allPendingCommands)[idx]
+		cmd := fakePidToCmd[fPid]
+		*allPendingCommands = append((*allPendingCommands)[:idx], (*allPendingCommands)[idx+1:]...)
+		delete(pidPendingCommands[mkPid], fPid)
+		nPending--
+
+		// Create a completion queue if necessary.
+		if _, ok := completedCommands[mkPid]; !ok {
+			completedCommands[mkPid] = make(chan ChildCmd, maxLiveChildren)
+		}
+
+		// Run the command in the background.
+		atomic.AddInt64(&currentLiveChildren, 1)
+		go func() {
+			// Run the command then "kill" it to remove it from
+			// fakePidToCmd.
+			beginTime := time.Now()
+			err := cmd.Run()
+			if err != nil {
+				log.Fatal(err)
+			}
+			stats.ObserveExecution(fPid, mkPid, time.Since(beginTime))
+			atomic.AddInt64(&currentLiveChildren, -1)
+
+			qRespChan := make(chan pid_t)
+			qReqChan <- queueRequest{Request: KillRequest, MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}
+			_ = <-qRespChan
+			completedCommands[mkPid] <- ChildCmd{Cmd: cmd, FakePid: fPid}
+		}()
+	}
+	qReq.RespChan <- 1
+	close(qReq.RespChan)
+}
+
+// UpdateState serially updates global state in a concurrent context.  Much of
 // what the program actually does is encapsulated in the UpdateState routine.
 func UpdateState() {
 	allPendingCommands := make([]pid_t, 0, maxLiveChildren) // All pending commands (by fake PID) across all Make processes
@@ -138,174 +311,15 @@ func UpdateState() {
 		if qReq.RespChan == nil {
 			log.Fatal("Internal error processing a queue request")
 		}
-		mkPid := qReq.MakePid
 		switch qReq.Request {
 		case HelloRequest:
-			// Allocate a fake PID for a new GNU Make process.
-			fPid := nextFakePid
-			if nextFakePid == maxFakePid {
-				log.Fatalf("Too many processes (> %d)", maxFakePid)
-			}
-			nextFakePid++
-			stats.ObserveSpawn(mkPid, fPid)
-			qReq.RespChan <- fPid
-			close(qReq.RespChan)
-
+			updateStateHello(&qReq)
 		case EnqueueRequest:
-			// Allocate a new fake PID.
-			fPid := nextFakePid
-			fakePidToCmd[fPid] = qReq.Command
-			if nextFakePid == maxFakePid {
-				log.Fatalf("Too many processes (> %d)", maxFakePid)
-			}
-			nextFakePid++
-
-			// Set the fake PID in the command's environment.
-			elide := -1
-			newEnv := qReq.Command.Env
-			for i, eVar := range newEnv {
-				if strings.HasPrefix(eVar, "STRESSMAKE_FAKE_PID=") {
-					elide = i
-					break
-				}
-			}
-			if elide == -1 {
-				log.Fatal("Internal error: fake PID not set")
-			}
-			oldLen := len(newEnv)
-			newEnv[elide] = newEnv[oldLen-1]
-			newEnv = newEnv[:oldLen-1]
-			qReq.Command.Env = append(newEnv, fmt.Sprintf("STRESSMAKE_FAKE_PID=%d", fPid))
-
-			// Enqueue a new pending command on both the global
-			// list and the per-PID set.
-			allPendingCommands = append(allPendingCommands, fPid)
-			pidMap, ok := pidPendingCommands[mkPid]
-			if !ok {
-				// This is the first request from PID MakePid.
-				pidMap = make(map[pid_t]empty, maxLiveChildren)
-				pidPendingCommands[mkPid] = pidMap
-			}
-			pidMap[fPid] = *&empty{}
-
-			// For reporting purposes, keep track of the maximium
-			// number of pending + running commands that existed at
-			// any one time and of the total number of commands
-			// enqueued.
-			nConc := int64(len(allPendingCommands)) + atomic.LoadInt64(&currentLiveChildren) - 1 // -1 because of GNU Make itself
-			stats.ObserveConcurrency(nConc)
-
-			// Return the fake PID.
-			qReq.RespChan <- fPid
-			close(qReq.RespChan)
-
+			updateStateEnqueue(&qReq, &allPendingCommands, pidPendingCommands)
 		case KillRequest:
-			// Kill the job if it's running.
-			fPid := qReq.KillPid
-			cmd, ok := fakePidToCmd[fPid]
-			if !ok {
-				// Error case (invalid fake PID)
-				qReq.RespChan <- 0
-				close(qReq.RespChan)
-				continue
-			}
-			if cmd.Process != nil {
-				// Job has launched.  Kill it.
-				if cmd.Process.Signal(os.Kill) != nil {
-					ok = false
-				}
-			}
-
-			// Whether or not the job has launched, elide the
-			// command from allPendingCommands, and delete it from
-			// pidPendingCommands.  Also delete the association
-			// between the fake PID and the command.
-			delete(fakePidToCmd, fPid)
-			for i := range allPendingCommands {
-				if allPendingCommands[i] == fPid {
-					allPendingCommands = append(allPendingCommands[:i], allPendingCommands[i+1:]...)
-					delete(pidPendingCommands[mkPid], fPid)
-					break
-				}
-			}
-			if ok {
-				qReq.RespChan <- 1
-			} else {
-				qReq.RespChan <- 0
-			}
-			close(qReq.RespChan)
-			continue
-
+			updateStateKill(&qReq, &allPendingCommands, pidPendingCommands)
 		case WaitRequest:
-			// Ensure we have a command to run.
-			nPending := len(allPendingCommands)
-			if nPending == 0 {
-				if atomic.LoadInt64(&currentLiveChildren) == 0 {
-					// Something is seriously wrong.  Make
-					// thought it had pending commands, but
-					// it didn't.
-					qReq.RespChan <- 0
-				} else {
-					// We have nothing new to run so the
-					// caller just needs to wait for the
-					// currently running commands to
-					// finish.
-					qReq.RespChan <- 1
-				}
-				close(qReq.RespChan)
-				continue
-			}
-
-			// Run as many commands as we can.
-			for nPending > 0 && atomic.LoadInt64(&currentLiveChildren) < maxLiveChildren {
-				// Select a pending command to run.
-				var idx int
-				switch deqOrder {
-				case FIFOOrder:
-					idx = 0
-				case LIFOOrder:
-					idx = nPending - 1
-				case RandomOrder:
-					idx = prng.Intn(nPending)
-				default:
-					log.Fatal("Internal error processing the dequeue order")
-				}
-
-				// Elide the command from allPendingCommands,
-				// and delete it from pidPendingCommands.
-				fPid := allPendingCommands[idx]
-				cmd := fakePidToCmd[fPid]
-				allPendingCommands = append(allPendingCommands[:idx], allPendingCommands[idx+1:]...)
-				delete(pidPendingCommands[mkPid], fPid)
-				nPending--
-
-				// Create a completion queue if necessary.
-				if _, ok := completedCommands[mkPid]; !ok {
-					completedCommands[mkPid] = make(chan ChildCmd, maxLiveChildren)
-				}
-
-				// Run the command in the background.
-				atomic.AddInt64(&currentLiveChildren, 1)
-				go func() {
-					// Run the command then "kill" it to
-					// remove it from fakePidToCmd.
-					beginTime := time.Now()
-					err := cmd.Run()
-					if err != nil {
-						log.Fatal(err)
-					}
-					stats.ObserveExecution(fPid, mkPid, time.Since(beginTime))
-					atomic.AddInt64(&currentLiveChildren, -1)
-
-					qRespChan := make(chan pid_t)
-					qReqChan <- queueRequest{Request: KillRequest, MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}
-					_ = <-qRespChan
-					completedCommands[mkPid] <- ChildCmd{Cmd: cmd, FakePid: fPid}
-				}()
-			}
-			qReq.RespChan <- 1
-			close(qReq.RespChan)
-
+			updateStateWait(&qReq, &allPendingCommands, pidPendingCommands)
 		default:
 			log.Fatal("Internal error -- bad request type")
 		}
