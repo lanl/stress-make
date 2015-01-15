@@ -32,7 +32,7 @@ const (
 )
 
 // deqOrder specifies the order in which we dequeue commands to run.
-var deqOrder DequeueOrder = LIFOOrder
+var deqOrder DequeueOrder
 
 // maxLiveChildren specifies the maximum number of children we allow
 // to execute concurrently.
@@ -530,7 +530,7 @@ func parseCommandLine() []string {
 		fset.PrintDefaults()
 	}
 	fset.Int64Var(&maxLiveChildren, "max-live", 1, "Maximum number of processes allowed to run at once")
-	qOrder := fset.String("order", "fifo", "Order in which to run processes (\"fifo\", \"lifo\", or \"random\")")
+	qOrder := fset.String("order", "lifo", "Order in which to run processes (\"lifo\", \"fifo\", or \"random\")")
 	argNames := []string{"help", "h"}
 	fset.VisitAll(func(f *flag.Flag) {
 		argNames = append(argNames, f.Name)
