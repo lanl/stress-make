@@ -48,6 +48,9 @@ var stats *Statistics = NewStatistics()
 // As in C, a pid_t represents a process ID (real or fake).
 type pid_t int
 
+// maxFakePid is the maximum value allowed for a fake PID.
+const maxFakePid pid_t = 2147483647
+
 // ChildCmd extends *exec.Cmd with a fake PID to return to GNU Make.
 type ChildCmd struct {
 	*exec.Cmd
@@ -62,11 +65,8 @@ var completedCommands map[pid_t]chan ChildCmd
 // structure.
 var fakePidToCmd map[pid_t]*exec.Cmd
 
-// maxFakePid is the maximum value allowed for a fake PID.
-var maxFakePid pid_t = 2147483647
-
-// nextPid is the next available (fake) process ID we should return.
-var nextFakePid pid_t = 2
+// nextFakePid is the next available fake process ID we should return.
+var nextFakePid pid_t = 1
 
 // prng is a pseudorandom-number generator.
 var prng *rand.Rand
@@ -103,15 +103,27 @@ func createSocket() (string, *net.UnixListener) {
 	}
 }
 
+// A RequestType is used internally to identify what a GNU Make
+// process is requesting.
+type RequestType int
+
+const (
+	HelloRequest   = RequestType(iota + 1) // New GNU Make process says hello
+	EnqueueRequest                         // Enqueue a command to run sometime
+	WaitRequest                            // Poll or block for an enqueued command to complete
+	KillRequest                            // Terminate an enqueued or running command
+)
+
 // A queueRequest is used internally to request updates to global data
 // structures.  MakePid and RespChan must always be specified.  If neither
 // Command nor Killpid are specified, this requests that a pending shell
 // command be run.
 type queueRequest struct {
-	MakePid  pid_t      // Process ID (from a GNU Make process) that initiated the request
-	Command  *exec.Cmd  // Command to enqueue on the pending queue
-	KillPid  pid_t      // (Fake) process ID to kill
-	RespChan chan pid_t // Response (success code or PID)
+	Request  RequestType // Action to perform
+	MakePid  pid_t       // Process ID (from a GNU Make process) that initiated the request
+	Command  *exec.Cmd   // Command to enqueue on the pending queue
+	KillPid  pid_t       // (Fake) process ID to kill
+	RespChan chan pid_t  // Response (success code or PID)
 }
 
 // qReqChan is the channel used to talk to the single instance of UpdateState.
@@ -127,8 +139,19 @@ func UpdateState() {
 			log.Fatal("Internal error processing a queue request")
 		}
 		mkPid := qReq.MakePid
-		switch {
-		case qReq.Command != nil:
+		switch qReq.Request {
+		case HelloRequest:
+			// Allocate a fake PID for a new GNU Make process.
+			fPid := nextFakePid
+			if nextFakePid == maxFakePid {
+				log.Fatalf("Too many processes (> %d)", maxFakePid)
+			}
+			nextFakePid++
+			stats.ObserveSpawn(mkPid, fPid)
+			qReq.RespChan <- fPid
+			close(qReq.RespChan)
+
+		case EnqueueRequest:
 			// Allocate a new fake PID.
 			fPid := nextFakePid
 			fakePidToCmd[fPid] = qReq.Command
@@ -136,6 +159,23 @@ func UpdateState() {
 				log.Fatalf("Too many processes (> %d)", maxFakePid)
 			}
 			nextFakePid++
+
+			// Set the fake PID in the command's environment.
+			elide := -1
+			newEnv := qReq.Command.Env
+			for i, eVar := range newEnv {
+				if strings.HasPrefix(eVar, "STRESSMAKE_FAKE_PID=") {
+					elide = i
+					break
+				}
+			}
+			if elide == -1 {
+				log.Fatal("Internal error: fake PID not set")
+			}
+			oldLen := len(newEnv)
+			newEnv[elide] = newEnv[oldLen-1]
+			newEnv = newEnv[:oldLen-1]
+			qReq.Command.Env = append(newEnv, fmt.Sprintf("STRESSMAKE_FAKE_PID=%d", fPid))
 
 			// Enqueue a new pending command on both the global
 			// list and the per-PID set.
@@ -159,7 +199,7 @@ func UpdateState() {
 			qReq.RespChan <- fPid
 			close(qReq.RespChan)
 
-		case qReq.KillPid > 0:
+		case KillRequest:
 			// Kill the job if it's running.
 			fPid := qReq.KillPid
 			cmd, ok := fakePidToCmd[fPid]
@@ -196,7 +236,7 @@ func UpdateState() {
 			close(qReq.RespChan)
 			continue
 
-		default:
+		case WaitRequest:
 			// Ensure we have a command to run.
 			nPending := len(allPendingCommands)
 			if nPending == 0 {
@@ -254,29 +294,41 @@ func UpdateState() {
 					if err != nil {
 						log.Fatal(err)
 					}
-					stats.ObserveExecution(pid_t(cmd.Process.Pid), mkPid, time.Since(beginTime))
+					stats.ObserveExecution(fPid, mkPid, time.Since(beginTime))
 					atomic.AddInt64(&currentLiveChildren, -1)
 
 					qRespChan := make(chan pid_t)
-					qReqChan <- queueRequest{MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}
+					qReqChan <- queueRequest{Request: KillRequest, MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}
 					_ = <-qRespChan
 					completedCommands[mkPid] <- ChildCmd{Cmd: cmd, FakePid: fPid}
 				}()
 			}
 			qReq.RespChan <- 1
 			close(qReq.RespChan)
+
+		default:
+			log.Fatal("Internal error -- bad request type")
 		}
+
 	}
 }
 
 // A RemoteQuery represents a query received from a socket.
 type RemoteQuery struct {
-	Request string   // Either "spawn", "status", or "kill"
+	Request string   // Either "hello", "spawn", "status", or "kill"
 	Args    []string // spawn: Command to run plus all arguments
 	Environ []string // spawn: Environment to use (list of key=value pairs)
 	Block   bool     // status: true=wait; false=return immediately
 	Victim  pid_t    // kill: Victim process ID (really a fake PID)
-	Pid     pid_t    // all: GNU Make process ID
+	Pid     pid_t    // all: GNU Make process ID (really a fake PID)
+}
+
+// killProcess sends a kill signal to a pending or running process.
+func helloFromMake(query *RemoteQuery, conn *net.UnixConn) {
+	// Request a new fake PID and send that to GNU Make.
+	qRespChan := make(chan pid_t)
+	qReqChan <- queueRequest{Request: HelloRequest, MakePid: query.Pid, RespChan: qRespChan}
+	fmt.Fprint(conn, <-qRespChan)
 }
 
 // enqueueCommand prepares a user-specified command for execution and
@@ -306,7 +358,7 @@ func enqueueCommand(query *RemoteQuery, conn *net.UnixConn) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	qRespChan := make(chan pid_t)
-	qReqChan <- queueRequest{MakePid: query.Pid, Command: cmd, RespChan: qRespChan}
+	qReqChan <- queueRequest{Request: EnqueueRequest, MakePid: query.Pid, Command: cmd, RespChan: qRespChan}
 	fmt.Fprint(conn, <-qRespChan)
 }
 
@@ -328,7 +380,7 @@ func awaitCommand(query *RemoteQuery, conn *net.UnixConn) {
 
 	// Launch as many new commands as possible,
 	qRespChan := make(chan pid_t)
-	qReqChan <- queueRequest{MakePid: mkPid, RespChan: qRespChan}
+	qReqChan <- queueRequest{Request: WaitRequest, MakePid: mkPid, RespChan: qRespChan}
 	if <-qRespChan == 0 {
 		// Something went wrong -- probably that there are no new
 		// commands to run.  Notify the caller.
@@ -389,7 +441,7 @@ func killProcess(query *RemoteQuery, conn *net.UnixConn) {
 
 	// Kill the process.
 	qRespChan := make(chan pid_t)
-	qReqChan <- queueRequest{MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}
+	qReqChan <- queueRequest{Request: KillRequest, MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}
 	if <-qRespChan == 0 {
 		// Something went wrong -- probably that there the victim PID
 		// is invalid.
@@ -411,6 +463,8 @@ func processQuery(conn *net.UnixConn) {
 
 	// Process the query.
 	switch query.Request {
+	case "hello":
+		helloFromMake(&query, conn)
 	case "spawn":
 		enqueueCommand(&query, conn)
 	case "status":
@@ -440,6 +494,7 @@ func spawnMake(sockName string, argList []string) {
 	os.Setenv("PATH", path.Dir(makeExecutable)+":"+os.Getenv("PATH"))
 	os.Setenv("MAKE", makeExecutable)
 	os.Setenv("STRESSMAKE_SOCKET", sockName)
+	os.Setenv("STRESSMAKE_FAKE_PID", "0")
 
 	// Launch our customized GNU Make and wait for it to complete.
 	cmd := exec.Command(makeExecutable, argList...)
@@ -450,7 +505,7 @@ func spawnMake(sockName string, argList []string) {
 	if err := cmd.Run(); err != nil {
 		log.Fatal(err)
 	}
-	stats.ObserveExecution(pid_t(cmd.Process.Pid), 0, time.Since(beginTime))
+	stats.ObserveExecution(1, 0, time.Since(beginTime))
 }
 
 // ParseCommandLine parses the command line.

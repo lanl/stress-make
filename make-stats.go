@@ -36,17 +36,24 @@ func (st *Statistics) ObserveConcurrency(conc int64) {
 	}
 }
 
+// ObserveSpawn associates a fake parent PID with a fake child PID.
+func (st *Statistics) ObserveSpawn(parent, child pid_t) {
+	_, ok := st.children[parent]
+	if !ok {
+		st.children[parent] = make([]pid_t, 0, 4)
+	}
+	st.children[parent] = append(st.children[parent], child)
+}
+
 // ObserveExecution keeps track of a process that finished executing.
 func (st *Statistics) ObserveExecution(pid, mkPid pid_t, elapsed time.Duration) {
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	st.totalProcs++
 	st.pidToTime[pid] = elapsed
-	_, ok := st.children[mkPid]
-	if !ok {
-		st.children[mkPid] = make([]pid_t, 0, 4)
+	if mkPid > 0 {
+		st.ObserveSpawn(mkPid, pid)
 	}
-	st.children[mkPid] = append(st.children[mkPid], pid)
 }
 
 // GetMaxConcurrency returns the maximum concurrency observed.

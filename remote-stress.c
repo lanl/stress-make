@@ -24,6 +24,7 @@
 char *remote_description = "Stress Tester";  /* Identify ourself to GNU Make */
 static int have_server = 0;       /* 1=use stress-test server; 0=ordinary make */
 static char *socket_name = NULL;  /* Name of the Unix-domain socket for server communication */
+static int fake_pid;              /* Fake PID assigned to us by stress-make */
 
 /* Given a string, escape double quotes and backslashes.  The caller
    should free() the result.  We don't currently handle Unicode
@@ -123,12 +124,34 @@ failure:
 void
 remote_setup (void)
 {
+  char *fake_pid_str;   /* Fake PID given us by our parent */
+  char *request;        /* Existence announcement to send to stress-make */
+  const char *response; /* New fake PID assigned to us by stress-make */
+
+  /* Ensure we were launched by stress-make. */
   socket_name = getenv("STRESSMAKE_SOCKET");
-  if (socket_name == NULL) {
+  fake_pid_str = getenv("STRESSMAKE_FAKE_PID");
+  if (socket_name == NULL || fake_pid_str == NULL) {
     message(1, "Not performing Makefile stress-testing (not run from stress-make)");
     return;
   }
   socket_name = strdup(socket_name);
+
+  /* Announce our existence to stress-make.  We tell stress-make our
+   * parent's fake PID and receive a fake PID of our own in return. */
+  request = (char *)malloc(MAX_REQUEST_LEN);
+  if (request == NULL) {
+    message(1, "Not performing Makefile stress-testing (failed allocation)");
+    return;
+  }
+  sprintf(request, "{\"Request\": \"hello\", \"Pid\": %s}", fake_pid_str);
+  response = request_response(request);
+  if (response == NULL)
+    return;
+  free((void *)request);
+  fake_pid = atoi(response);
+
+  /* We're ready to go. */
   have_server = 1;
   message(1, "Performing Makefile stress-testing");
 }
@@ -200,7 +223,7 @@ start_remote_job (char **argv, char **envp, int stdin_fd,
     free((void *)fragment);
   }
   rp -= 2;  /* Drop the final comma and space. */
-  rp += sprintf(rp, "], \"Pid\": %ld}", (long int)getpid());
+  rp += sprintf(rp, "], \"Pid\": %d}", fake_pid);
 
   /* Send a job-launch request to the stress-test server. */
   response = request_response(request);
@@ -236,8 +259,8 @@ remote_status (int *exit_code_ptr, int *signal_ptr,
     return -1;
 
   /* Construct a status request. */
-  sprintf(request, "{\"Request\": \"status\", \"Block\": %s, \"Pid\": %ld}",
-	  block ? "true" : "false", (long int)getpid());
+  sprintf(request, "{\"Request\": \"status\", \"Block\": %s, \"Pid\": %d}",
+	  block ? "true" : "false", fake_pid);
 
   /* Send a status request to the stress-test server. */
   response = request_response(request);
@@ -278,8 +301,8 @@ remote_kill (int id, UNUSED int sig)
     return -1;
 
   /* Construct a status request. */
-  sprintf(request, "{\"Request\": \"kill\", \"Victim\": %d, \"Pid\": %ld}",
-	  id, (long int)getpid());
+  sprintf(request, "{\"Request\": \"kill\", \"Victim\": %d, \"Pid\": %d}",
+	  id, fake_pid);
 
   /* Send a status request to the stress-test server. */
   response = request_response(request);
