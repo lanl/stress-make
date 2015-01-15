@@ -273,8 +273,8 @@ func UpdateState() {
 					if err != nil {
 						log.Fatal(err)
 					}
-					atomic.AddInt64(&currentLiveChildren, -1)
 					stats.ObserveExecution(pid_t(cmd.Process.Pid), mkPid, time.Since(beginTime))
+					atomic.AddInt64(&currentLiveChildren, -1)
 
 					qRespChan := make(chan pid_t)
 					qReqChan <- queueRequest{MakePid: mkPid, KillPid: fPid, RespChan: qRespChan}

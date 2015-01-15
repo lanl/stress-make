@@ -37,16 +37,16 @@ func (st *Statistics) ObserveConcurrency(conc int64) {
 }
 
 // ObserveExecution keeps track of a process that finished executing.
-func (st *Statistics) ObserveExecution(pid, ppid pid_t, elapsed time.Duration) {
+func (st *Statistics) ObserveExecution(pid, mkPid pid_t, elapsed time.Duration) {
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	st.totalProcs++
 	st.pidToTime[pid] = elapsed
-	kids, ok := st.children[ppid]
+	_, ok := st.children[mkPid]
 	if !ok {
-		st.children[ppid] = make([]pid_t, 0, 4)
+		st.children[mkPid] = make([]pid_t, 0, 4)
 	}
-	st.children[ppid] = append(kids, pid)
+	st.children[mkPid] = append(st.children[mkPid], pid)
 }
 
 // GetMaxConcurrency returns the maximum concurrency observed.
