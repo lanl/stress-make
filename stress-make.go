@@ -42,6 +42,10 @@ var maxLiveChildren int64 = 1
 // currently executing.  The initial GNU Make process counts as 1.
 var currentLiveChildren int64 = 1
 
+// When verbose is true, stress-make outputs additional information about its
+// activities.
+var verbose bool
+
 // stats keeps track of various interesting statistics regarding the build.
 var stats *Statistics = NewStatistics()
 
@@ -101,6 +105,19 @@ func createSocket() (string, *net.UnixListener) {
 			return sockName, listener
 		}
 	}
+}
+
+// mergeArgs merges an argument list into a single string.
+func mergeArgs(args []string) string {
+	quotedArgs := make([]string, len(args))
+	for i, arg := range args {
+		if len(arg) > 0 && !strings.ContainsAny(arg, "'` $\"\n\t\r") {
+			quotedArgs[i] = arg
+		} else {
+			quotedArgs[i] = "'" + strings.Replace(arg, "'", `'\''`, -1) + "'"
+		}
+	}
+	return strings.Join(quotedArgs, " ")
 }
 
 // A RequestType is used internally to identify what a GNU Make
@@ -284,6 +301,9 @@ func updateStateWait(qReq *queueRequest, allPendingCommands *[]pid_t, pidPending
 		go func() {
 			// Run the command then "kill" it to remove it from
 			// fakePidToCmd.
+			if verbose {
+				log.Printf("Running enqueued job: %s", mergeArgs(cmd.Args))
+			}
 			beginTime := time.Now()
 			err := cmd.Run()
 			if err != nil {
@@ -360,7 +380,7 @@ func enqueueCommand(query *RemoteQuery, conn *net.UnixConn) {
 	cmd := exec.Command(query.Args[0], query.Args[1:]...)
 	cmd.Env = query.Environ
 	for _, keyval := range query.Environ {
-		if keyval[:4] == "PWD=" {
+		if strings.HasPrefix(keyval, "PWD=") {
 			cmd.Dir = keyval[4:]
 			break
 		}
@@ -529,8 +549,9 @@ func parseCommandLine() []string {
 		fmt.Fprintf(os.Stderr, "Usage: %s [<stress-make options>] [<make options>] [<targets>]\n", os.Args[0])
 		fset.PrintDefaults()
 	}
-	fset.Int64Var(&maxLiveChildren, "max-live", 1, "Maximum number of processes allowed to run at once")
+	fset.BoolVar(&verbose, "verbose", false, "Output additional status information")
 	qOrder := fset.String("order", "lifo", "Order in which to run processes (\"lifo\", \"fifo\", or \"random\")")
+	fset.Int64Var(&maxLiveChildren, "max-live", 1, "Maximum number of processes allowed to run at once")
 	argNames := []string{"help", "h"}
 	fset.VisitAll(func(f *flag.Flag) {
 		argNames = append(argNames, f.Name)
@@ -574,7 +595,7 @@ argLoop:
 func main() {
 	// Prepare the logger for issuing warnings and errors.
 	log.SetFlags(0)
-	log.SetPrefix(os.Args[0] + ": ")
+	log.SetPrefix(path.Base(os.Args[0]) + ": ")
 
 	// Parse the command line.
 	makeArgs := parseCommandLine()
