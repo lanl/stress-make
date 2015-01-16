@@ -18,9 +18,6 @@ import (
 	"time"
 )
 
-// makeExecutable is the full path to our customized GNU Make.
-const makeExecutable = "/tmp/gnumake/bin/make"
-
 // Define a dequeue order.
 type DequeueOrder int
 
