@@ -47,7 +47,7 @@ AC_MSG_RESULT([ok])
 AC_SUBST([GMAKEDIR], [$gmakedir])
 
 dnl Untar and patch GNU Make.
-AC_MSG_NOTICE([Extracting $make_tar])
+AC_MSG_NOTICE([Extracting and patching $make_tar])
 $TAR -xaf "$make_tar"
 cp "$srcdir/remote-stress.c" "$gmakedir/remote-stub.c"
 cnf_prefix="$prefix"
@@ -60,8 +60,9 @@ prefix="$cnf_prefix"
 exec_prefix="$cnf_exec_prefix"
 ./configure $CONFIGURE_COMMAND_LINE --prefix="$pkglibexecdir" --bindir="$pkglibexecdir/bin"
 EOF
-dnl All tests will fail due to "not run from stress-make" messages.
-rm -r -f "$gmakedir/tests"
+dnl Disable GNU Make tests, which will all fail due to "not run from
+dnl stress-make" messages.
+$SED -i -e '/^check-local:/s/check-regression//' "$gmakedir/Makefile.in"
 
 dnl Configure GNU Make and generate our own Makefile.
 AC_CONFIG_SUBDIRS([$gmakedir])
