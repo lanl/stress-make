@@ -6,7 +6,7 @@
 ###################################
 
 SUBDIRS = $(GMAKEDIR) .
-EXTRA_DIST = remote-stress.c
+EXTRA_DIST = remote-stress.c README.md INSTALL.md COPYING.md
 gmakebindir = $(pkglibexecdir)/bin
 
 BUILT_SOURCES = stress_make_SOURCES_builddir
