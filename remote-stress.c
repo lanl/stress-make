@@ -16,6 +16,7 @@
 #ifndef UNIX_PATH_MAX
 # define UNIX_PATH_MAX 108
 #endif
+#include "remote-stress.h"
 
 #define MAX_REQUEST_LEN 100   /* Maximum bytes in a fixed-length request to the server */
 #define MAX_RESPONSE_LEN 100   /* Maximum bytes in a response from the server */
@@ -25,6 +26,18 @@ char *remote_description = "Stress Tester";  /* Identify ourself to GNU Make */
 static int have_server = 0;       /* 1=use stress-test server; 0=ordinary make */
 static char *socket_name = NULL;  /* Name of the Unix-domain socket for server communication */
 static int fake_pid;              /* Fake PID assigned to us by stress-make */
+
+/* Until GNU Make 4.1, message() took two arguments.  From GNU Make
+   4.1 onwards, message() takes three arguments.  Because we currently
+   pass only static strings to message() we can use a simple macro to
+   construct the extra argument (string length) if necessary. */
+#if NUM_MESSAGE_ARGS == 2
+# define makemessage(P, S) message(P, S)
+#elif NUM_MESSAGE_ARGS == 3
+# define makemessage(P, S) message(P, strlen(S), S)
+#else
+# error The message function takes an unknown number of arguments.
+#endif
 
 /* Given a string, escape double quotes and backslashes.  The caller
    should free() the result.  We don't currently handle Unicode
@@ -115,7 +128,7 @@ request_response (const char *request)
   return response;
 
 failure:
-  message(1, "Failed to communicate with the stress-testing server");
+  makemessage(1, "Failed to communicate with the stress-testing server");
   have_server = 0;
   return NULL;
 }
@@ -132,7 +145,7 @@ remote_setup (void)
   socket_name = getenv("STRESSMAKE_SOCKET");
   fake_pid_str = getenv("STRESSMAKE_FAKE_PID");
   if (socket_name == NULL || fake_pid_str == NULL) {
-    message(1, "Not performing Makefile stress-testing (not run from stress-make)");
+    makemessage(1, "Not performing Makefile stress-testing (not run from stress-make)");
     return;
   }
   socket_name = strdup(socket_name);
@@ -141,7 +154,7 @@ remote_setup (void)
    * parent's fake PID and receive a fake PID of our own in return. */
   request = (char *)malloc(MAX_REQUEST_LEN);
   if (request == NULL) {
-    message(1, "Not performing Makefile stress-testing (failed allocation)");
+    makemessage(1, "Not performing Makefile stress-testing (failed allocation)");
     return;
   }
   sprintf(request, "{\"Request\": \"hello\", \"Pid\": %s}", fake_pid_str);
@@ -153,7 +166,7 @@ remote_setup (void)
 
   /* We're ready to go. */
   have_server = 1;
-  message(1, "Performing Makefile stress-testing");
+  makemessage(1, "Performing Makefile stress-testing");
 }
 
 /* Perform any required cleanup actions. */

@@ -64,6 +64,29 @@ dnl Disable GNU Make tests, which will all fail due to "not run from
 dnl stress-make" messages.
 $SED -i -e '/^check-local:/s/check-regression//' "$gmakedir/Makefile.in"
 
+dnl Determine if GNU Make's message() function requires 3 arguments (v4.1+)
+dnl or 2 arguments (v4.0-).  We use grep because we haven't yet configured
+dnl the GNU Make subdirectory.
+AC_CACHE_CHECK([the minimum number of arguments to `message'],
+  [ax_cv_func_message_args],
+  [orig_CPPFLAGS="$CPPFLAGS"
+   CPPFLAGS="$CPPFLAGS -I$gmakedir"
+   touch "$gmakedir/config.h"
+   AC_EGREP_HEADER(
+    [^void message.*prefix.*length.*fmt],
+    [makeint.h],
+    [ax_cv_func_message_args=3],
+    [AC_EGREP_HEADER(
+      [^void message.*prefix.*fmt],
+      [makeint.h],
+      [ax_cv_func_message_args=2],
+      [ax_cv_func_message_args=unknown])])
+   CPPFLAGS="$orig_CPPFLAGS"])
+if test "x$ax_cv_func_message_args" = xunknown ; then
+  AC_MSG_ERROR([failed to parse $gmakedir/makeint.h])
+fi
+echo "#define NUM_MESSAGE_ARGS $ax_cv_func_message_args" > "$gmakedir/remote-stress.h"
+
 dnl Configure GNU Make and generate our own Makefile.
 AC_CONFIG_SUBDIRS([$gmakedir])
 AC_CONFIG_FILES([Makefile])

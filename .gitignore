@@ -5,6 +5,7 @@ Makefile.in
 aclocal.m4
 autom4te.cache
 autoscan.log
+compile
 config.log
 config.status
 configure
@@ -13,4 +14,4 @@ make-[0-9]*
 make-location.go
 missing
 stress-make
-stress-make-*.tar.gz
+stress-make-*
