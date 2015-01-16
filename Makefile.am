@@ -44,8 +44,8 @@ install-exec-hook: $(GMAKEDIR)
 	cd $(GMAKEDIR) && \
 	  $(MAKE) install
 	cd $(DESTDIR)$(customized_make_dir) && \
-	  $(LN_S) make gmake && \
-	  $(LN_S) make gnumake
+	  $(LN_S) -f make gmake && \
+	  $(LN_S) -f make gnumake
 
 CLEANFILES = make-location.go
 
