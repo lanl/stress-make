@@ -22,9 +22,9 @@ AC_SUBST([CONFIGURE_COMMAND_LINE], [$ac_configure_args])
 
 dnl Check for a few common programs we need configure and
 dnl build stress-make.
+AC_CHECK_PROGS([TAR], [tar], [tar])
 AC_PROG_SED
 AC_PROG_LN_S
-AC_CHECK_PROGS([TAR], [tar], [tar])
 
 dnl We require go proper (not even gccgo) to build stress-make.
 AC_CHECK_PROGS([GO], [go], [no])
@@ -44,9 +44,26 @@ if test -z "$gmakedir" ; then
   AC_MSG_ERROR([Specify --with-make-tar to point configure to a valid make-*.tar.gz])
 fi
 AC_MSG_RESULT([ok])
-AC_SUBST([GMAKETAR], [$make_tar])
 AC_SUBST([GMAKEDIR], [$gmakedir])
 
-dnl Generate a Makefile.
+dnl Untar and patch GNU Make.
+AC_MSG_NOTICE([Extracting $make_tar])
+$TAR -xaf "$make_tar"
+cp "$srcdir/remote-stress.c" "$gmakedir/remote-stub.c"
+cnf_prefix="$prefix"
+cnf_exec_prefix="$exec_prefix"
+test "x$cnf_prefix" = xNONE && cnf_prefix=$ac_default_prefix
+test "x$cnf_exec_prefix" = xNONE && cnf_exec_prefix='${prefix}'
+pkglibexecdir="${libexecdir}/${PACKAGE_NAME}"
+cat <<EOF > "$gmakedir/configure.gnu"
+prefix="$cnf_prefix"
+exec_prefix="$cnf_exec_prefix"
+./configure $CONFIGURE_COMMAND_LINE --prefix="$pkglibexecdir" --bindir="$pkglibexecdir/bin"
+EOF
+dnl All tests will fail due to "not run from stress-make" messages.
+rm -r -f "$gmakedir/tests"
+
+dnl Configure GNU Make and generate our own Makefile.
+AC_CONFIG_SUBDIRS([$gmakedir])
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT

@@ -5,20 +5,11 @@
 # By Scott Pakin <pakin@lanl.gov> #
 ###################################
 
+SUBDIRS = $(GMAKEDIR) .
 EXTRA_DIST = remote-stress.c
-customized_make_dir = $(pkglibexecdir)/bin
+gmakebindir = $(pkglibexecdir)/bin
 
-$(GMAKEDIR): $(GMAKETAR) remote-stress.c
-	$(TAR) -xaf $(GMAKETAR)
-	cd $(GMAKEDIR) && \
-	  cp $(abs_srcdir)/remote-stress.c remote-stubs.c && \
-	  ./configure $(CONFIGURE_COMMAND_LINE) \
-	    --prefix="$(pkglibexecdir)" \
-	    --srcdir="$(abs_builddir)/$(GMAKEDIR)" \
-	    --bindir="$(pkglibexecdir)/bin" && \
-	  $(MAKE)
-
-BUILT_SOURCES = $(GMAKEDIR) stress_make_SOURCES_builddir
+BUILT_SOURCES = stress_make_SOURCES_builddir
 
 bin_PROGRAMS = stress-make
 stress_make_SOURCES = stress-make.go make-stats.go
@@ -38,18 +29,16 @@ stress-make$(EXEEXT): $(stress_make_SOURCES) $(nodist_stress_make_SOURCES)
 
 make-location.go:
 	echo 'package main' > make-location.go
-	echo "const makeExecutable = \"$(customized_make_dir)/make\"" >> make-location.go
+	echo "const makeExecutable = \"$(gmakebindir)/make\"" >> make-location.go
 
-install-exec-hook: $(GMAKEDIR)
-	cd $(GMAKEDIR) && \
-	  $(MAKE) install
-	cd $(DESTDIR)$(customized_make_dir) && \
-	  $(LN_S) -f make gmake && \
-	  $(LN_S) -f make gnumake
+install-exec-hook:
+	$(INSTALL) -d "$(DESTDIR)$(gmakebindir)"
+	$(LN_S) -f make "$(DESTDIR)$(gmakebindir)/gmake"
+	$(LN_S) -f make "$(DESTDIR)$(gmakebindir)/gnumake"
 
 CLEANFILES = make-location.go
 
-clean-local:
+distclean-local:
 	$(RM) -r $(GMAKEDIR)
 
 uninstall-local:
