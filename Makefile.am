@@ -5,11 +5,10 @@
 # By Scott Pakin <pakin@lanl.gov> #
 ###################################
 
-SUBDIRS = $(GMAKEDIR) .
+SUBDIRS = $(GMAKEDIR)
 EXTRA_DIST = remote-stress.c README.md INSTALL.md COPYING.md
 gmakebindir = $(pkglibexecdir)/bin
-
-BUILT_SOURCES = stress_make_SOURCES_builddir
+AM_DISTCHECK_CONFIGURE_FLAGS = $(WITH_MAKE_TAR)
 
 bin_PROGRAMS = stress-make
 stress_make_SOURCES = stress-make.go make-stats.go
@@ -18,6 +17,8 @@ nodist_stress_make_SOURCES = make-location.go
 GO_VERBOSE = $(GO_VERBOSE_@AM_V@)
 GO_VERBOSE_ = $(GO_VERBOSE_@AM_DEFAULT_V@)
 GO_VERBOSE_0 = @echo GO $@;
+
+BUILT_SOURCES = stress_make_SOURCES_builddir
 
 stress_make_SOURCES_builddir: $(stress_make_SOURCES)
 	test "$(abs_builddir)" == $(abs_srcdir) || $(LN_S) -f $(addprefix $(srcdir)/, $(stress_make_SOURCES)) $(builddir)
@@ -43,3 +44,7 @@ distclean-local:
 
 uninstall-local:
 	$(RM) -r $(DESTDIR)$(pkglibexecdir)
+
+dist-hook:
+	chmod -R u+rwX $(distdir)/$(GMAKEDIR)
+	$(RM) -r  $(distdir)/$(GMAKEDIR)

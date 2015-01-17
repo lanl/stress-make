@@ -16,15 +16,14 @@ AC_ARG_WITH([make-tar],
     [pristine make-VERSION.tar.gz file to untar and patch])],
   [make_tar="$withval"],
   [make_tar="make.tar.gz"])
-
-dnl Export our command line to the Makefile.
-AC_SUBST([CONFIGURE_COMMAND_LINE], [$ac_configure_args])
+AC_SUBST([WITH_MAKE_TAR], "--with-make-tar=$make_tar")
 
 dnl Check for a few common programs we need configure and
 dnl build stress-make.
 AC_CHECK_PROGS([TAR], [tar], [tar])
 AC_PROG_SED
 AC_PROG_LN_S
+AC_PROG_FGREP
 
 dnl We require go proper (not even gccgo) to build stress-make.
 AC_CHECK_PROGS([GO], [go], [no])
@@ -50,18 +49,26 @@ dnl Untar and patch GNU Make.
 AC_MSG_NOTICE([Extracting and patching $make_tar])
 $TAR -xaf "$make_tar"
 cp "$srcdir/remote-stress.c" "$gmakedir/remote-stub.c"
-cnf_prefix="$prefix"
-cnf_exec_prefix="$exec_prefix"
-test "x$cnf_prefix" = xNONE && cnf_prefix=$ac_default_prefix
-test "x$cnf_exec_prefix" = xNONE && cnf_exec_prefix='${prefix}'
+# Create a configure.gnu file.  This requires
+# temporarily expanding $prefix and $exec_prefix.
+old_prefix="$prefix"
+old_exec_prefix="$exec_prefix"
+test "x$prefix" = xNONE && prefix="$ac_default_prefix"
+test "x$exec_prefix" = xNONE && exec_prefix='${prefix}'
 pkglibexecdir="${libexecdir}/${PACKAGE_NAME}"
+while `echo "$pkglibexecdir" | $FGREP -q '$'` ; do
+      pkglibexecdir="`eval echo $pkglibexecdir`"
+done
+prefix="$old_prefix"
+exec_prefix="$old_exec_prefix"
+gmake_configure_args=`echo "$ac_configure_args" | \
+  $SED -e "s/'--\\(with-make-tar\\|srcdir\\|prefix\\|exec_prefix\\)=[[^']]*'//g"`
 cat <<EOF > "$gmakedir/configure.gnu"
-prefix="$cnf_prefix"
-exec_prefix="$cnf_exec_prefix"
-./configure $CONFIGURE_COMMAND_LINE --prefix="$pkglibexecdir" --bindir="$pkglibexecdir/bin"
+./configure $gmake_configure_args --prefix="$pkglibexecdir" --bindir="$pkglibexecdir/bin"
 EOF
-dnl Disable GNU Make tests, which will all fail due to "not run from
-dnl stress-make" messages.
+chmod +x "$gmakedir/configure.gnu"
+# Suppress GNU Make tests, which will all fail due to "not run from
+# stress-make" messages.
 $SED -i -e '/^check-local:/s/check-regression//' "$gmakedir/Makefile.in"
 
 dnl Determine if GNU Make's message() function requires 3 arguments (v4.1+)
@@ -87,7 +94,11 @@ if test "x$ax_cv_func_message_args" = xunknown ; then
 fi
 echo "#define NUM_MESSAGE_ARGS $ax_cv_func_message_args" > "$gmakedir/remote-stress.h"
 
-dnl Configure GNU Make and generate our own Makefile.
-AC_CONFIG_SUBDIRS([$gmakedir])
+dnl Configure GNU Make.  AC_CONFIG_SUBDIRS([$gmakedir]) doesn't seem
+dnl to work when we run "make distcheck".
+AC_MSG_NOTICE([Configuring GNU Make])
+(cd "$gmakedir" && ./configure.gnu)
+
+dnl Generate our own Makefile.
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
