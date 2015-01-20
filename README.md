@@ -4,7 +4,7 @@ Stress Make
 Description
 -----------
 
-Stress Make helps developers identify race conditions in their `Makefile`s.
+Stress Make helps developers expose race conditions in their `Makefile`s.
 
 [GNU Make](http://www.gnu.org/software/make/) supports a `-j` (or `--jobs`) option that allows multiple jobs (commands) to run in parallel.  However, it is the developer's responsibility to ensure that dependencies among rules are specified correctly.  One problem that arises is that an incorrect `Makefile` may build correctly on one system even if it fails on another system simple due to the order that the jobs happen to run.
 

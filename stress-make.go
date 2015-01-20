@@ -299,12 +299,12 @@ func updateStateWait(qReq *queueRequest, allPendingCommands *[]pid_t, pidPending
 			// Run the command then "kill" it to remove it from
 			// fakePidToCmd.
 			if verbose {
-				log.Printf("Running enqueued job: %s", mergeArgs(cmd.Args))
+				log.Printf("Running enqueued job (ID %d): %s", fPid, mergeArgs(cmd.Args))
 			}
 			beginTime := time.Now()
 			err := cmd.Run()
-			if err != nil {
-				log.Fatal(err)
+			if err != nil && verbose {
+				log.Printf("Job ID %d failed (%s)", fPid, err)
 			}
 			stats.ObserveExecution(fPid, mkPid, time.Since(beginTime))
 			atomic.AddInt64(&currentLiveChildren, -1)
@@ -548,7 +548,6 @@ func parseCommandLine() []string {
 	}
 	fset.BoolVar(&verbose, "verbose", false, "Output additional status information")
 	qOrder := fset.String("order", "lifo", "Order in which to run processes (\"lifo\", \"fifo\", or \"random\")")
-	fset.Int64Var(&maxLiveChildren, "max-live", 1, "Maximum number of processes allowed to run at once")
 	argNames := []string{"help", "h"}
 	fset.VisitAll(func(f *flag.Flag) {
 		argNames = append(argNames, f.Name)
