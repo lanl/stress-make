@@ -18,7 +18,7 @@ See [INSTALL.md](https://github.com/losalamos/stress-make/blob/master/INSTALL.md
 Usage
 -----
 
-Simple replace `make` with `stress-make` when building code and specify `-j` with no number to request maximum concurrency.  Stress Make will serialize execution so there's no risk of bogging down your machine with hundreds of processes fighting for the CPU.  Optionally, you can specify `--order=random` to randomize the order in which processes execute.  (There's also `--order=fifo`, but that's the default for `make` so it's not particularly interesting from a stress-testing perspective.)
+Simple replace `make` with `stress-make` when building code.  Stress Make will always enable unbounded concurrency (the equivalent of `-j` with no argument) but will serialize actual execution so there's no risk of bogging down your machine with hundreds of processes fighting for the CPU.  Optionally, you can specify `--order=random` to randomize the order in which processes execute.  (There's also `--order=fifo`, but that's the default for `make` so it's not particularly interesting from a stress-testing perspective.)
 
 When the build is complete, Stress Make outputs some information about the build.  For example, it outputs the following when building itself:
 

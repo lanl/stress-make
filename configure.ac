@@ -46,7 +46,8 @@ AC_MSG_RESULT([ok])
 AC_SUBST([GMAKEDIR], [$gmakedir])
 
 dnl Untar and patch GNU Make.
-AC_MSG_NOTICE([Extracting and patching $make_tar])
+AS_ECHO_N(["extracting and patching $gmakedir from $make_tar... "])
+rm -rf "$gmakedir"
 $TAR -xaf "$make_tar"
 cp "$srcdir/remote-stress.c" "$gmakedir/remote-stub.c"
 # Create a configure.gnu file.  This requires
@@ -70,6 +71,11 @@ chmod +x "$gmakedir/configure.gnu"
 # Suppress GNU Make tests, which will all fail due to "not run from
 # stress-make" messages.
 $SED -i -e '/^check-local:/s/check-regression//' "$gmakedir/Makefile.in"
+# Effectively force "-j" for all compilations.
+$SED -i -e 's/ job_slots = 1;/ job_slots = 0;/' "$gmakedir/main.c"
+# Identify make as having been patched.
+$SED -i -e 's/ = VERSION;/ = VERSION "-stress";/' "$gmakedir/version.c"
+AS_ECHO([done])
 
 dnl Determine if GNU Make's message() function requires 3 arguments (v4.1+)
 dnl or 2 arguments (v4.0-).  We use grep because we haven't yet configured
