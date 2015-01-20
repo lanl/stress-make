@@ -403,20 +403,21 @@ func awaitCommand(query *RemoteQuery, conn *net.UnixConn) {
 	}
 	mkPid := query.Pid
 
-	// If GNU Make blocks, it no longer counts as live.
+	// Launch new commands as lazily as possible.
 	if query.Block {
+		// If GNU Make blocks, it no longer counts as live.
 		atomic.AddInt64(&currentLiveChildren, -1)
 		defer atomic.AddInt64(&currentLiveChildren, 1)
-	}
 
-	// Launch as many new commands as possible,
-	qRespChan := make(chan pid_t)
-	qReqChan <- queueRequest{Request: WaitRequest, MakePid: mkPid, RespChan: qRespChan}
-	if <-qRespChan == 0 {
-		// Something went wrong -- probably that there are no new
-		// commands to run.  Notify the caller.
-		fmt.Fprint(conn, "-1 0 0 0")
-		return
+		// Launch as many new commands as possible,
+		qRespChan := make(chan pid_t)
+		qReqChan <- queueRequest{Request: WaitRequest, MakePid: mkPid, RespChan: qRespChan}
+		if <-qRespChan == 0 {
+			// Something went wrong -- probably that there are no
+			// new commands to run.  Notify the caller.
+			fmt.Fprint(conn, "-1 0 0 0")
+			return
+		}
 	}
 
 	// If we were asked to block, then block until a running command
