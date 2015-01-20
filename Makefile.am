@@ -13,6 +13,7 @@ AM_DISTCHECK_CONFIGURE_FLAGS = $(WITH_MAKE_TAR)
 bin_PROGRAMS = stress-make
 stress_make_SOURCES = stress-make.go make-stats.go
 nodist_stress_make_SOURCES = make-location.go
+man1_MANS = stress-make.1
 
 GO_VERBOSE = $(GO_VERBOSE_@AM_V@)
 GO_VERBOSE_ = $(GO_VERBOSE_@AM_DEFAULT_V@)

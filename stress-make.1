@@ -1,0 +1,55 @@
+.TH STRESS-MAKE 1 2015-01-20 "LANL" "User Commands"
+.SH NAME
+stress-make \- Modified GNU make utility to stress-test Makefiles
+.SH SYNOPSIS
+.B stress-make
+[\fB--order\fR=lifo|fifo|random]
+[\fB--verbose\fR]
+[\fIMAKE-OPTION\fR]... [\fITARGET\fR]...
+.SH DESCRIPTION
+\fBstress-make\fR helps developers expose race conditions in their
+\fCMakefile\fRs.  The program is a customized version of \s-1GNU\s0
+Make (\fBmake\fR) that explicitly manages the order in which
+concurrent jobs are run in order to provoke erroneous behavior into
+becoming manifest.  It can run jobs in the order they're launched, in
+backwards order, or in random order.  The thought is that if code
+builds correctly with \fBstress-make\fR then it is likely (but not
+guaranteed) that the \fCMakefile\fR contains no race conditions.
+.SH OPTIONS
+\fBstress-make\fR accepts all \fBmake\fR options plus the following
+additional options:
+.TP 1c
+\fB--order\fR=\fIexecution_order\fR
+Specify the order in which \fBstress-make\fR should execute concurrent
+jobs.  \fIexecution_order\fR should be one of the following:
+.PI 2c
+.RS
+.TP 1c
+\fClifo\fR (default)
+Execute jobs in the reverse order that \fBstress-make\fR spawned them.
+.TP 1c
+\fCfifo\fR
+Execute jobs in the same order that \fBstress-make\fR spawned them.
+(This isn't particularly useful because it's pretty much what
+\fBmake\fR already does.)
+.TP 1c
+\fCrandom\fR
+Execute jobs in random order.  Multiple runs in random order can be a
+good way to determine if a \fCMakefile\fR is likely to be robust to
+parallel execution.
+.RE
+.TP 1c
+\fB--verbose\fR
+Output status messages (e.g., when an enqueued job is finally executed).
+.SH CAVEATS
+\fBstress-make\fR disregards \fBmake\fR's \fB-j\fR (or \fB--jobs\fR)
+option.  It always runs with the equivalent of \fB-j\fR with no
+argument (unbounded concurrency).  Unlike regular \fBmake\fR, however,
+\fBstress-make\fR does not actually allow an unbounded number of jobs
+to run in parallel, only one.
+.SH AUTHOR
+Scott Pakin, \fIpakin@lanl.gov\fR
+.SH COPYRIGHT
+Copyright \(co 2015 Los Alamos National Security, LLC
+.SH SEE ALSO
+\fImake\fR\|(1)
