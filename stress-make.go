@@ -299,12 +299,12 @@ func updateStateWait(qReq *queueRequest, allPendingCommands *[]pid_t, pidPending
 			// Run the command then "kill" it to remove it from
 			// fakePidToCmd.
 			if verbose {
-				log.Printf("Running enqueued job (ID %d): %s", fPid, mergeArgs(cmd.Args))
+				log.Printf("INFO: Running enqueued job (ID %d): %s", fPid, mergeArgs(cmd.Args))
 			}
 			beginTime := time.Now()
 			err := cmd.Run()
 			if err != nil && verbose {
-				log.Printf("Job ID %d failed (%s)", fPid, err)
+				log.Printf("INFO: Job ID %d failed (%s)", fPid, err)
 			}
 			stats.ObserveExecution(fPid, mkPid, time.Since(beginTime))
 			atomic.AddInt64(&currentLiveChildren, -1)
