@@ -53,41 +53,81 @@ quote_for_json (const char *str)
     switch (*c) {
       case '"':
       case '\\':
-	*nc++ = '\\';
-	*nc++ = *c;
-	break;
+        *nc++ = '\\';
+        *nc++ = *c;
+        break;
 
       case '\n':
-	*nc++ = '\\';
-	*nc++ = 'n';
-	break;
-	
-      case '\r':
-	*nc++ = '\\';
-	*nc++ = 'r';
-	break;
-	
-      case '\t':
-	*nc++ = '\\';
-	*nc++ = 't';
-	break;
-	
-      case '\b':
-	*nc++ = '\\';
-	*nc++ = 'b';
-	break;
-	
-      case '\f':
-	*nc++ = '\\';
-	*nc++ = 'f';
-	break;
+        *nc++ = '\\';
+        *nc++ = 'n';
+        break;
 
-      default:	
-	*nc++ = *c;
-	break;
+      case '\r':
+        *nc++ = '\\';
+        *nc++ = 'r';
+        break;
+
+      case '\t':
+        *nc++ = '\\';
+        *nc++ = 't';
+        break;
+
+      case '\b':
+        *nc++ = '\\';
+        *nc++ = 'b';
+        break;
+
+      case '\f':
+        *nc++ = '\\';
+        *nc++ = 'f';
+        break;
+
+      default:
+        *nc++ = *c;
+        break;
     }
   *nc = '\0';
-  return newstr;	
+  return newstr;
+}
+
+/* Set an environment variable in a given array of environment variables.
+   Return a new array that the caller should free_envp(). */
+static char **
+setenvp (char **envp, const char *name, const char *value)
+{
+  size_t nenv = 0;         /* Number of entries in envp (excluding NULL) */
+  char **new_envp;         /* Copy of envp with NAME set to VALUE */
+  char **e;                /* Pointer into envp */
+  char **ne;               /* Pointer into new_envp */
+  size_t namelen;          /* Length of name */
+
+  for (e = envp; *e; e++)
+    nenv++;
+  new_envp = malloc((nenv + 2) * sizeof(char *));
+  if (new_envp == NULL)
+    abort();
+  namelen = strlen(name);
+  for (e = envp, ne = new_envp; *e; e++)
+    if (strncmp(*e, name, namelen) != 0 || (*e)[namelen] != '=')
+      *ne++ = strdup(*e);
+  *ne = malloc(namelen + strlen(value) + 2);
+  if (*ne == NULL)
+    abort();
+  sprintf(*ne, "%s=%s", name, value);
+  ne++;
+  *ne = NULL;
+  return new_envp;
+}
+
+/* Free memory allocated by setenvp. */
+static void
+free_envp (char **envp)
+{
+  char **e;          /* Pointer into envp */
+
+  for (e = envp; *e; e++)
+    free((void *) *e);
+  free(envp);
 }
 
 /* Send a request to the server and receive a response.  Return a
@@ -193,28 +233,35 @@ start_remote_job (char **argv, char **envp, int stdin_fd,
                   int *is_remote, int *id_ptr,
                   int *used_stdin)
 {
-  char *request = NULL;  /* Message to send */
-  char *rp;          /* Pointer into request */
-  char *fragment;    /* Fragment of a JSON message to send to the server */
-  char **cp;         /* Pointer into argv or envp */
-  ssize_t nBytes;    /* Number of bytes to send */
+  char *request = NULL;   /* Message to send */
+  char *rp;               /* Pointer into request */
+  char *fragment;         /* Fragment of a JSON message to send to the server */
+  char **cp;              /* Pointer into argv or envp */
+  ssize_t nBytes;         /* Number of bytes to send */
   const char *response;   /* Response from server */
+  char cwd[PATH_MAX + 1]; /* Current working directory */
+  char **new_envp;        /* Copy of envp with STRESSMAKE_CWD defined */
 
   /* Do nothing if we were not run from the stress-test server. */
   if (!have_server)
     return -1;
+
+  /* Set the STRESSMAKE_PWD environment variable to the current directory. */
+  if (getcwd(cwd, PATH_MAX + 1) == NULL)
+    goto failure;
+  new_envp = setenvp(envp, "STRESSMAKE_CWD", cwd);
 
   /* Bound the size of the request. */
   nBytes = 100;     /* Fixed contents, rounded up a bit */
   for (cp = argv; *cp; cp++) {
     fragment = quote_for_json(*cp);
     nBytes += strlen(fragment) + 4;    /* String + two double quotes + comma + space */
-    free((void *)fragment);    
+    free((void *)fragment);
   }
-  for (cp = envp; *cp; cp++) {
+  for (cp = new_envp; *cp; cp++) {
     fragment = quote_for_json(*cp);
     nBytes += strlen(fragment) + 4;    /* String + two double quotes + comma + space */
-    free((void *)fragment);    
+    free((void *)fragment);
   }
   request = (char *)malloc(nBytes);
   if (request == NULL)
@@ -230,7 +277,7 @@ start_remote_job (char **argv, char **envp, int stdin_fd,
   }
   rp -= 2;  /* Drop the final comma and space. */
   rp += sprintf(rp, "], \"Environ\": [");
-  for (cp = envp; *cp; cp++) {
+  for (cp = new_envp; *cp; cp++) {
     fragment = quote_for_json(*cp);
     rp += sprintf(rp, "\"%s\", ", fragment);
     free((void *)fragment);
@@ -242,6 +289,8 @@ start_remote_job (char **argv, char **envp, int stdin_fd,
   response = request_response(request);
   if (response == NULL)
     goto failure;
+  free((void *)request);
+  free_envp(new_envp);
   *is_remote = 1;
   *id_ptr = atoi(response);
   *used_stdin = 0;
@@ -250,6 +299,8 @@ start_remote_job (char **argv, char **envp, int stdin_fd,
  failure:
   if (request != NULL)
     free((void *)request);
+  if (new_envp != NULL)
+    free_envp(new_envp);
   return -1;
 }
 
@@ -273,7 +324,7 @@ remote_status (int *exit_code_ptr, int *signal_ptr,
 
   /* Construct a status request. */
   sprintf(request, "{\"Request\": \"status\", \"Block\": %s, \"Pid\": %d}",
-	  block ? "true" : "false", fake_pid);
+          block ? "true" : "false", fake_pid);
 
   /* Send a status request to the stress-test server. */
   response = request_response(request);
@@ -315,7 +366,7 @@ remote_kill (int id, UNUSED int sig)
 
   /* Construct a status request. */
   sprintf(request, "{\"Request\": \"kill\", \"Victim\": %d, \"Pid\": %d}",
-	  id, fake_pid);
+          id, fake_pid);
 
   /* Send a status request to the stress-test server. */
   response = request_response(request);

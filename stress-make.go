@@ -377,13 +377,13 @@ func enqueueCommand(query *RemoteQuery, conn *net.UnixConn) {
 	cmd := exec.Command(query.Args[0], query.Args[1:]...)
 	cmd.Env = query.Environ
 	for _, keyval := range query.Environ {
-		if strings.HasPrefix(keyval, "PWD=") {
-			cmd.Dir = keyval[4:]
+		if strings.HasPrefix(keyval, "STRESSMAKE_CWD=") {
+			cmd.Dir = keyval[15:]
 			break
 		}
 	}
 	if cmd.Dir == "" {
-		log.Fatal("Spawn request did not include PWD in the environment")
+		log.Fatal("Spawn request did not include STRESSMAKE_CWD in the environment")
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
