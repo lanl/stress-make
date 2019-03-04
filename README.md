@@ -13,7 +13,7 @@ Stress Make is a customized GNU Make that explicitly manages the order in which 
 Installation
 ------------
 
-See [INSTALL.md](https://github.com/losalamos/stress-make/blob/master/INSTALL.md) for installation instructions.
+See [INSTALL.md](https://github.com/lanl/stress-make/blob/master/INSTALL.md) for installation instructions.
 
 Usage
 -----
@@ -30,12 +30,12 @@ When the build is complete, Stress Make outputs some information about the build
 
 That is, the build launched a total of 71 jobs.  At most 28 of these were enqueued or running at the same time.  Excluding queue delays and Stress Make overhead, the build would have finished in a little over a second if executed serially.  (This is known as <q>work</q> or <i>T</i><sub>1</sub>.)  Given an infinite number of CPUs, the build could have completed in a little over half a second.  (This is known as <q>span</q> or <i>T</i><sub>&infin;</sub>.)  Hence, the `Makefile` offers only enough concurrency to support a maximum speedup of 2x no matter how many CPUs you throw at it.
 
-See Charles Leiserson's <q>[What the $#@! is Parallelism, Anyhow?](https://software.intel.com/en-us/articles/what-the-is-parallelism-anyhow-1)</q> article for a nice discussion of work, span, parallelism, and related concepts.
+See Charles Leiserson's <q>[What the $#@! is Parallelism, Anyhow?](https://www.cprogramming.com/parallelism.html)</q> article for a nice discussion of work, span, parallelism, and related concepts.
 
 Copyright and license
 ---------------------
 
-Los Alamos National Security, LLC (LANS) owns the copyright to Stress Make, which it identifies internally as LA-CC-11-056.  The license is BSD-ish with a "modifications must be indicated" clause.  See [COPYING.md](https://github.com/losalamos/stress-make/blob/master/COPYING.md) for the full text.
+Triad National Security, LLC (LANS) owns the copyright to Stress Make, which it identifies internally as LA-CC-11-056.  The license is BSD-ish with a "modifications must be indicated" clause.  See [LICENSE.md](https://github.com/lanl/stress-make/blob/master/LICENSE.md) for the full text.
 
 Author
 ------
