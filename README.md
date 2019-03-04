@@ -35,7 +35,7 @@ See Charles Leiserson's <q>[What the $#@! is Parallelism, Anyhow?](https://www.c
 Copyright and license
 ---------------------
 
-Triad National Security, LLC (LANS) owns the copyright to Stress Make, which it identifies internally as LA-CC-11-056.  The license is BSD-ish with a "modifications must be indicated" clause.  See [LICENSE.md](https://github.com/lanl/stress-make/blob/master/LICENSE.md) for the full text.
+Triad National Security, LLC (Triad) owns the copyright to Stress Make, which it identifies internally as LA-CC-11-056.  The license is BSD-ish with a "modifications must be indicated" clause.  See [LICENSE.md](https://github.com/lanl/stress-make/blob/master/LICENSE.md) for the full text.
 
 Author
 ------
