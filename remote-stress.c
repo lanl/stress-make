@@ -14,7 +14,7 @@
 #include <sys/un.h>
 #include <string.h>
 #ifndef UNIX_PATH_MAX
-# define UNIX_PATH_MAX 108
+# define UNIX_PATH_MAX sizeof(((struct sockaddr_un *)NULL)->sun_path)
 #endif
 #include "remote-stress.h"
 
