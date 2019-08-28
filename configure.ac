@@ -37,7 +37,21 @@ if ! test -e "$make_tar" ; then
   AC_MSG_RESULT([not found])
   AC_MSG_ERROR([Specify --with-make-tar to point configure to make-*.tar.gz])
 fi
-gmakedir=`$TAR -taf "$make_tar" | $SED 's,/.*,,' | uniq | head -1`
+case $make_tar in
+    *.tar.gz|*.tgz)
+        tarflag="z"
+        ;;
+    *.tar.xz|*.txz)
+        tarflags="J"
+        ;;
+    *.tar.bz2|*.tbz2)
+        tarflags="j"
+        ;;
+    *)
+        tarflags=""
+        ;;
+esac
+gmakedir=`$TAR -t${tarflag}f "$make_tar" | $SED 's,/.*,,' | uniq | head -1`
 if test -z "$gmakedir" ; then
   AC_MSG_RESULT([error])
   AC_MSG_ERROR([Specify --with-make-tar to point configure to a valid make-*.tar.gz])
@@ -48,7 +62,7 @@ AC_SUBST([GMAKEDIR], [$gmakedir])
 dnl Untar and patch GNU Make.
 AS_ECHO_N(["extracting and patching $gmakedir from $make_tar... "])
 rm -rf "$gmakedir"
-$TAR -xaf "$make_tar"
+$TAR -x${tarflag}f "$make_tar"
 cp "$srcdir/remote-stress.c" "$gmakedir/remote-stub.c"
 # Create a configure.gnu file.  This requires
 # temporarily expanding $prefix and $exec_prefix.
