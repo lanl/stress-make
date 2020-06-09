@@ -13,7 +13,7 @@ AM_INIT_AUTOMAKE([foreign])
 dnl Find a GNU Make tarball we can patch.
 AC_ARG_WITH([make-tar],
   [AS_HELP_STRING([--with-make-tar],
-    [pristine make-VERSION.tar.gz file to untar and patch])],
+    [pristine make-VERSION.tar* file to untar and patch])],
   [make_tar="$withval"],
   [make_tar="make.tar.gz"])
 AC_SUBST([WITH_MAKE_TAR], "--with-make-tar=$make_tar")
@@ -32,11 +32,13 @@ if test "$GO" = no ; then
 fi
 
 dnl Ensure the GNU Make tarball exists and looks reasonable.
-AC_MSG_CHECKING([$make_tar])
+AC_MSG_CHECKING([make source tarball option])
 if ! test -e "$make_tar" ; then
   AC_MSG_RESULT([not found])
   AC_MSG_ERROR([Specify --with-make-tar to point configure to make-*.tar.gz])
 fi
+AC_MSG_RESULT(["$make_tar"])
+
 case $make_tar in
     *.tar.gz|*.tgz)
         tarflag="z"
@@ -47,11 +49,16 @@ case $make_tar in
     *.tar.bz2|*.tbz2)
         tarflags="j"
         ;;
+    *.tar.lz)
+        tarflags="--lzip"
+        ;;
     *)
         tarflags=""
         ;;
 esac
 gmakedir=`$TAR -t${tarflag}f "$make_tar" | $SED 's,/.*,,' | uniq | head -1`
+
+AC_MSG_CHECKING([make source tarball '$make_tar'])
 if test -z "$gmakedir" ; then
   AC_MSG_RESULT([error])
   AC_MSG_ERROR([Specify --with-make-tar to point configure to a valid make-*.tar.gz])
