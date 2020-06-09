@@ -6,7 +6,7 @@ Description
 
 Stress Make helps developers expose race conditions in their `Makefile`s.
 
-[GNU Make](http://www.gnu.org/software/make/) supports a `-j` (or `--jobs`) option that allows multiple jobs (commands) to run in parallel.  However, it is the developer's responsibility to ensure that dependencies among rules are specified correctly.  One problem that arises is that an incorrect `Makefile` may build correctly on one system even if it fails on another system simple due to the order that the jobs happen to run.
+[GNU Make](http://www.gnu.org/software/make/) supports a `-j` (or `--jobs`) option that allows multiple jobs (commands) to run in parallel.  However, it is the developer's responsibility to ensure that dependencies among rules are specified correctly.  One problem that arises is that an incorrect `Makefile` may build correctly on one system even if it fails on another system simply due to the order that the jobs happen to run.
 
 Stress Make is a customized GNU Make that explicitly manages the order in which concurrent jobs are run in order to provoke erroneous behavior into becoming manifest.  It can run jobs in the order they're launched, in backwards order, or in random order.  The thought is that if code builds correctly with Stress Make then it is likely (but not guaranteed) that the `Makefile` contains no race conditions.
 
@@ -18,7 +18,7 @@ See [INSTALL.md](https://github.com/lanl/stress-make/blob/master/INSTALL.md) for
 Usage
 -----
 
-Simple replace `make` with `stress-make` when building code.  Stress Make will always enable unbounded concurrency (the equivalent of `-j` with no argument) but will serialize actual execution so there's no risk of bogging down your machine with hundreds of processes fighting for the CPU.  Optionally, you can specify `--order=random` to randomize the order in which processes execute.  (There's also `--order=fifo`, but that's the default for `make` so it's not particularly interesting from a stress-testing perspective.)
+Simply replace `make` with `stress-make` when building code.  Stress Make will always enable unbounded concurrency (the equivalent of `-j` with no argument) but will serialize actual execution so there's no risk of bogging down your machine with hundreds of processes fighting for the CPU.  Optionally, you can specify `--order=random` to randomize the order in which processes execute.  (There's also `--order=fifo`, but that's the default for `make` so it's not particularly interesting from a stress-testing perspective.)
 
 When the build is complete, Stress Make outputs some information about the build.  For example, it outputs the following when building itself:
 
